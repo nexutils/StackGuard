@@ -1,0 +1,2243 @@
+# compose rules for StackGuard.
+id: COMP_SEC_001
+title: Container is running in privileged mode
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Container is running in privileged mode"
+pass_message: No services run in privileged mode
+description: |
+  A privileged container gets every Linux capability and access to all host
+  devices. Compromising the container is effectively compromising the host.
+remediation: |
+  Remove `privileged: true`. Grant only the capabilities the service needs
+  with `cap_add`, or the devices it needs with `devices`.
+query:
+  path: privileged
+  equals: true
+---
+id: COMP_SEC_002
+title: Dangerous Linux capability granted
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Dangerous Linux capability granted ({{ .Value }})"
+description: |
+  These capabilities allow loading kernel modules, tracing other processes,
+  reconfiguring the network stack or bypassing file and MAC permissions, and
+  are common container escape vectors. (DAC_OVERRIDE and NET_RAW are omitted
+  because Docker already grants them by default.)
+remediation: |
+  Remove the capability. Start from `cap_drop: [ALL]` and add back only what
+  the process needs.
+query:
+  path: cap_add
+  contains_any: [ALL, SYS_ADMIN, SYS_MODULE, SYS_PTRACE, SYS_RAWIO, SYS_BOOT, SYS_TIME, NET_ADMIN, DAC_READ_SEARCH, MAC_ADMIN, MAC_OVERRIDE, BPF, PERFMON]
+---
+id: COMP_SEC_003
+title: No capabilities dropped from container
+severity: INFO
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — No capabilities dropped from container"
+description: |
+  Docker grants a default set of capabilities (CHOWN, NET_RAW, SETUID, ...)
+  that most services never use.
+remediation: |
+  Add `cap_drop: [ALL]` and `cap_add` back only what is required.
+query:
+  path: cap_drop
+  not_exists: true
+---
+id: COMP_SEC_004
+title: no-new-privileges is not enabled
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — no-new-privileges is not enabled"
+description: |
+  Without no-new-privileges, setuid binaries in the image can raise a
+  process's privileges.
+remediation: |
+  Add `security_opt: ["no-new-privileges:true"]`.
+query:
+  all:
+    - not:
+        path: security_opt
+        contains_any: ["no-new-privileges:true", "no-new-privileges"]
+    - not:
+        path: security_opt
+        contains: "no-new-privileges:false"
+---
+id: COMP_SEC_005
+title: Root filesystem is writable
+severity: INFO
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Root filesystem is writable"
+description: |
+  A writable root filesystem lets an attacker modify binaries and drop tools
+  inside the container.
+remediation: |
+  Set `read_only: true` and mount `tmpfs` or volumes for the paths that must
+  be writable.
+query:
+  any:
+    - path: read_only
+      not_exists: true
+    - path: read_only
+      equals: false
+---
+id: COMP_SEC_006
+title: Host network mode is enabled
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Host network mode is enabled"
+description: |
+  With host networking the container shares the host's network stack: no
+  isolation, every listening port is exposed on the host, and it can reach
+  services bound to localhost.
+remediation: |
+  Use a bridge or user-defined network and publish only the ports you need.
+query:
+  path: network_mode
+  equals: host
+---
+id: COMP_SEC_007
+title: Host PID namespace is shared
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Host PID namespace is shared"
+description: |
+  Sharing the host PID namespace lets the container see and signal every
+  process on the host.
+remediation: |
+  Remove `pid: host`.
+query:
+  path: pid
+  equals: host
+---
+id: COMP_SEC_008
+title: Host devices are exposed to container
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Host devices are exposed to container"
+description: |
+  Device access (disks, GPUs, /dev/mem, ...) bypasses much of the container
+  boundary.
+remediation: |
+  Remove `devices` / `device_cgroup_rules` unless the service genuinely needs
+  the hardware.
+query:
+  any:
+    - path: devices
+      exists: true
+    - path: device_cgroup_rules
+      exists: true
+---
+id: COMP_SEC_009
+title: Docker socket is mounted inside container
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Docker socket is mounted inside container ({{ .Value }})"
+pass_message: No service mounts the Docker socket
+description: |
+  Access to the Docker socket is equivalent to root on the host: the container
+  can start privileged containers.
+remediation: |
+  Remove the mount. If the service needs the Docker API, put a filtering proxy
+  (e.g. docker-socket-proxy) in front of it.
+query:
+  path: volumes.*
+  regex: '^[a-z]+:[^:]*docker\.sock:'
+---
+id: COMP_SEC_010
+title: Container runs as root user
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Container runs as root user"
+pass_message: No service is configured to run as root
+description: |
+  Running as root inside the container makes container escapes and file
+  permission mistakes far more damaging.
+remediation: |
+  Set `user` to an unprivileged UID, e.g. `user: "10001:10001"`.
+query:
+  path: user
+  regex: '^(root|0)(:.*)?$'
+---
+id: COMP_SEC_011
+title: User not explicitly specified
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — User not explicitly specified"
+description: |
+  Without `user`, the container runs as whatever the image specifies, which is
+  root for most images.
+remediation: |
+  Set `user` to an unprivileged UID.
+query:
+  path: user
+  not_exists: true
+---
+id: COMP_SEC_012
+title: AppArmor confinement is disabled
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — AppArmor confinement is disabled"
+description: |
+  Docker applies its docker-default AppArmor profile automatically on hosts
+  that use AppArmor; `apparmor:unconfined` removes that protection.
+remediation: |
+  Remove `apparmor=unconfined`, or reference a custom profile with
+  `apparmor=<profile>`.
+query:
+  path: security_opt
+  contains: "apparmor:unconfined"
+---
+id: COMP_SEC_013
+title: Seccomp filtering is disabled
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Seccomp filtering is disabled"
+description: |
+  Docker applies a default seccomp profile that blocks around 50 dangerous
+  syscalls; `seccomp:unconfined` removes it.
+remediation: |
+  Remove `seccomp=unconfined`, or supply a custom profile with
+  `seccomp=<file>`.
+query:
+  path: security_opt
+  contains: "seccomp:unconfined"
+---
+id: COMP_SEC_014
+title: Privilege escalation is explicitly allowed
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Privilege escalation is explicitly allowed"
+description: |
+  `no-new-privileges:false` explicitly lets processes gain privileges through
+  setuid binaries.
+remediation: |
+  Use `no-new-privileges:true`.
+query:
+  path: security_opt
+  contains: "no-new-privileges:false"
+---
+id: COMP_SEC_015
+title: Sensitive host directory mounted
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Sensitive host directory mounted ({{ .Value }})"
+description: |
+  Mounting system directories exposes host credentials, configuration or
+  kernel interfaces to the container.
+remediation: |
+  Mount only the specific files the service needs, read-only.
+query:
+  path: volumes.*
+  regex: '^bind:((/|/etc|/root|/boot|/proc|/sys|/dev|/home|/run|/var/run|/var/lib/docker)(/[^:]*)?|/usr|/lib|/lib64):'
+---
+id: COMP_SEC_016
+title: Host IPC namespace is shared
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Host IPC namespace is shared"
+description: |
+  Sharing the host IPC namespace weakens isolation between the container and
+  the host.
+remediation: |
+  Remove `ipc: host`.
+query:
+  path: ipc
+  equals: host
+---
+id: COMP_SEC_017
+title: Host UTS namespace is shared
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Host UTS namespace is shared"
+description: |
+  Sharing the host UTS namespace weakens isolation between the container and
+  the host.
+remediation: |
+  Remove `uts: host`.
+query:
+  path: uts
+  equals: host
+---
+id: COMP_SEC_018
+title: Host user namespace is shared
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Host user namespace is shared"
+description: |
+  Sharing the host user namespace weakens isolation between the container and
+  the host.
+remediation: |
+  Remove `userns_mode: host`.
+query:
+  path: userns_mode
+  equals: host
+---
+id: COMP_SEC_019
+title: Host cgroup namespace or custom cgroup parent used
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Host cgroup namespace or custom cgroup parent used"
+description: |
+  A host cgroup namespace or custom cgroup parent can bypass the resource
+  limits and isolation Docker sets up.
+remediation: |
+  Remove `cgroup: host` and `cgroup_parent`.
+query:
+  any:
+    - path: cgroup
+      equals: host
+    - path: cgroup_parent
+      exists: true
+---
+id: COMP_SEC_020
+title: Mount propagation is set to shared
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Mount propagation is set to shared ({{ .Value }})"
+description: |
+  Shared propagation lets mounts made inside the container appear on the host.
+remediation: |
+  Use the default `rprivate` propagation.
+query:
+  path: volumes.*
+  regex: '^bind:[^:]+:[^:]+:([a-zA-Z]+,)*r?shared(,|$)'
+---
+id: COMP_SEC_021
+title: SELinux labeling is disabled
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — SELinux labeling is disabled"
+description: |
+  `label:disable` turns off SELinux separation for the container.
+remediation: |
+  Remove `label=disable`; relabel bind mounts with `:z` or `:Z` instead.
+query:
+  path: security_opt
+  contains: "label:disable"
+---
+id: COMP_SEC_022
+title: Privileged host port is mapped
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Privileged host port is mapped ({{ .Value }})"
+description: |
+  Host ports below 1024 are privileged; publishing them (other than 80/443 for
+  a reverse proxy) usually exposes a system service.
+remediation: |
+  Publish the service on a port above 1023, or put it behind the reverse
+  proxy.
+query:
+  path: ports.*
+  where:
+    all:
+      - path: "@"
+        regex: '^(\[[^\]]*\]|[^:]*):([1-9][0-9]{0,2}|10[01][0-9]|102[0-3]):'
+      - not:
+          path: "@"
+          regex: '^(\[[^\]]*\]|[^:]*):(80|443):'
+---
+id: COMP_SEC_023
+title: SSH server is running inside container
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — SSH server is running inside container"
+description: |
+  An SSH daemon in a container adds an attack surface and a second, unmanaged
+  way in. Use `docker exec` for debugging.
+remediation: |
+  Remove sshd from the container.
+query:
+  any:
+    - path: image
+      regex: '(sshd|openssh-server)'
+    - path: command
+      regex: '(^|[ /])sshd( |$)'
+    - path: entrypoint
+      regex: '(^|[ /])sshd( |$)'
+---
+id: COMP_SEC_024
+title: Unsafe kernel parameter (sysctl) configured
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Unsafe kernel parameter (sysctl) configured ({{ .Value }})"
+description: |
+  These sysctls turn the container into a router or weaken the network stack's
+  defaults.
+remediation: |
+  Remove the sysctl unless the service is a deliberate network appliance.
+query:
+  path: sysctls.*
+  regex: '^(net\.ipv4\.ip_forward|net\.ipv[46]\.conf\.[a-z0-9_]+\.(forwarding|route_localnet|accept_redirects|accept_source_route)|net\.ipv4\.ip_unprivileged_port_start)='
+---
+id: COMP_SEC_025
+title: tmpfs mount allows execution or setuid
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — tmpfs mount allows execution or setuid ({{ .Value }})"
+description: |
+  Writable tmpfs mounts are a convenient place to drop and run attacker tools.
+remediation: |
+  Mount tmpfs with `noexec,nosuid`, e.g. `/tmp:size=64m,noexec,nosuid`.
+query:
+  any:
+    - path: tmpfs.*
+      not_matches: '(:|,)noexec(,|$)'
+    - path: tmpfs.*
+      not_matches: '(:|,)nosuid(,|$)'
+---
+id: COMP_SEC_026
+title: Docker daemon is exposed over TCP
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Docker daemon is exposed over TCP"
+description: |
+  A Docker daemon reachable over TCP gives anyone who can connect root on the
+  host.
+remediation: |
+  Use the Unix socket, or TLS client certificates and a firewall if remote
+  access is unavoidable.
+query:
+  any:
+    - path: environment.*
+      regex: '(?i)^docker_host=tcp://'
+    - path: ports.*
+      regex: ':(2375|2376)/tcp$'
+    - path: command
+      regex: '(-H\s*|--host[= ])tcp://'
+---
+id: COMP_IMG_001
+title: Latest image tag is used
+severity: ERROR
+category: maintainability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' uses the latest (or an implicit) tag: {{ .Resource.Properties.image }}"
+pass_message: Containers use pinned image versions
+description: |
+  `latest` (or no tag, which means latest) changes underneath you; deployments
+  stop being reproducible and rollbacks become guesswork.
+remediation: |
+  Pin a version tag, ideally with a digest: `postgres:16.3.2@sha256:...`.
+when:
+  path: image
+  exists: true
+query:
+  any:
+    - path: image
+      regex: ':latest(@|$)'
+    - path: image
+      not_matches: '(:[^/:@]+|@sha256:[a-f0-9]{64})$'
+---
+id: COMP_IMG_002
+title: Floating image tag detected
+severity: WARNING
+category: maintainability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' uses a floating tag: {{ .Resource.Properties.image }}"
+description: |
+  Major, minor and distro tags (`16`, `16.3`, `alpine`) are moved to new
+  builds; the same file deploys different code over time.
+remediation: |
+  Pin a full version (`16.3.2`) or a digest.
+query:
+  all:
+    - path: image
+      not_matches: '@sha256:'
+    - path: image
+      regex: ':(stable|lts|edge|main|master|develop|dev|nightly|current|alpine|slim|bookworm|bullseye|jammy|noble|[0-9]+|[0-9]+\.[0-9]+)(-(alpine|slim|bookworm|bullseye))?$'
+---
+id: COMP_IMG_003
+title: Image digest is not pinned
+severity: INFO
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Image digest is not pinned"
+description: |
+  Tags are mutable; only a digest guarantees the exact image that was reviewed
+  and tested is the one that runs.
+remediation: |
+  Append the digest: `image: nginx:1.27.0@sha256:...`.
+when:
+  path: image
+  exists: true
+query:
+  path: image
+  not_matches: '@sha256:[a-f0-9]{64}$'
+---
+id: COMP_IMG_004
+title: Locally built image has no version tag
+severity: WARNING
+category: maintainability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Locally built image has no version tag"
+description: |
+  An image built from `build:` without a versioned `image:` name cannot be
+  traced back to a release.
+remediation: |
+  Set `image: registry/app:${VERSION}` next to `build:`.
+when:
+  path: build
+  exists: true
+query:
+  any:
+    - path: image
+      not_exists: true
+    - path: image
+      regex: ':latest$'
+    - path: image
+      not_matches: ':[^/:@]+$'
+---
+id: COMP_IMG_005
+title: Pull policy not configured
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Pull policy not configured"
+description: |
+  Without a pull policy, a host keeps running whatever copy of a tag it pulled
+  first.
+remediation: |
+  Set `pull_policy: always` for mutable tags, or `missing` when images are
+  pinned by digest.
+query:
+  path: pull_policy
+  not_exists: true
+---
+id: COMP_IMG_006
+title: Image source registry is not trusted
+severity: WARNING
+category: security
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' pulls from an untrusted source: {{ .Resource.Properties.image }}"
+description: |
+  Images from unvetted registries or publishers bypass your supply-chain
+  controls. Edit the pattern to list your trusted registries, then enable the
+  rule.
+remediation: |
+  Mirror the image into a trusted registry.
+when:
+  path: image
+  exists: true
+query:
+  path: image
+  not_matches: '^((docker\.io/)?(library/)?[a-z0-9._-]+(:|@|$)|registry\.example\.com/|ghcr\.io/example-org/)'
+---
+id: COMP_IMG_007
+title: Secret passed as build argument
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Secret passed as build argument"
+description: |
+  Build arguments are stored in the image history, where anyone who can pull
+  the image can read them.
+remediation: |
+  Use BuildKit secrets (`build.secrets`) instead.
+query:
+  path: build.args.*
+  regex: '(?i)^[a-z0-9_]*(password|passwd|pwd|secret|token|api_?key|private_?key|access_?key|credentials?)[a-z0-9_]*='
+---
+id: COMP_IMG_008
+title: Image platform is not pinned
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Image platform is not pinned"
+description: |
+  Without `platform`, hosts of different architectures pull different images
+  (or emulate them slowly).
+remediation: |
+  Set `platform: linux/amd64` (or the architecture you test on).
+query:
+  path: platform
+  not_exists: true
+---
+id: COMP_REL_001
+title: Restart policy is missing
+severity: ERROR
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Restart policy is missing"
+pass_message: All services define a restart policy
+description: |
+  Without a restart policy a crashed container stays down until someone
+  notices.
+remediation: |
+  Set `restart: unless-stopped` (or `deploy.restart_policy` for Swarm).
+query:
+  all:
+    - any:
+        - path: restart
+          not_exists: true
+        - path: restart
+          equals: "no"
+    - path: deploy.restart_policy
+      not_exists: true
+---
+id: COMP_REL_002
+title: Healthcheck is missing
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Healthcheck is missing"
+pass_message: All services define a healthcheck
+description: |
+  Without a healthcheck Docker only knows whether the process runs, not
+  whether it serves, and `depends_on: service_healthy` cannot work.
+remediation: |
+  Add a `healthcheck` whose `test` exercises the service.
+query:
+  any:
+    - path: healthcheck
+      not_exists: true
+    - path: healthcheck.disable
+      equals: true
+---
+id: COMP_REL_003
+title: Dependency does not wait for healthy state
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Dependency does not wait for healthy state"
+description: |
+  `service_started` only waits for the container to start, not for the
+  dependency to be ready.
+remediation: |
+  Use `condition: service_healthy` and give the dependency a healthcheck.
+query:
+  path: depends_on.*.condition
+  equals: service_started
+---
+id: COMP_REL_004
+title: Healthcheck configuration is incomplete
+severity: INFO
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Healthcheck configuration is incomplete"
+description: |
+  Docker's defaults (30s interval, 30s timeout, 3 retries) are rarely right;
+  slow detection delays failover.
+remediation: |
+  Set `interval`, `timeout` and `retries` explicitly.
+when:
+  path: healthcheck.test
+  exists: true
+query:
+  any:
+    - path: healthcheck.interval
+      not_exists: true
+    - path: healthcheck.timeout
+      not_exists: true
+    - path: healthcheck.retries
+      not_exists: true
+---
+id: COMP_REL_005
+title: Graceful shutdown period is not configured
+severity: INFO
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Graceful shutdown period is not configured"
+description: |
+  Docker kills containers 10 seconds after SIGTERM by default, which can cut
+  off in-flight requests or writes.
+remediation: |
+  Set `stop_grace_period` to how long the service needs to drain.
+query:
+  path: stop_grace_period
+  not_exists: true
+---
+id: COMP_REL_006
+title: Startup dependency ordering may be unreliable
+severity: INFO
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Startup dependency ordering may be unreliable"
+description: |
+  The short list form of depends_on only waits for containers to start, not to
+  be ready.
+remediation: |
+  Use the long form with `condition: service_healthy`.
+query:
+  path: depends_on
+  type: list
+---
+id: COMP_REL_007
+title: Healthcheck has no start period
+severity: INFO
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Healthcheck has no start period"
+description: |
+  Without a start period, failed checks during a slow startup count against
+  `retries` and can mark a booting service unhealthy.
+remediation: |
+  Set `healthcheck.start_period` to the service's typical startup time.
+when:
+  path: healthcheck.test
+  exists: true
+query:
+  path: healthcheck.start_period
+  not_exists: true
+---
+id: COMP_REL_008
+title: Container may enter restart loop
+severity: INFO
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Container may enter restart loop"
+description: |
+  An always-restarting container with no health signal, or an unlimited `any`
+  restart policy, can crash-loop indefinitely without anyone noticing.
+remediation: |
+  Add a healthcheck, or bound `deploy.restart_policy.max_attempts`.
+query:
+  any:
+    - all:
+        - path: restart
+          equals: always
+        - path: healthcheck.test
+          not_exists: true
+    - all:
+        - path: deploy.restart_policy.condition
+          equals: any
+        - path: deploy.restart_policy.max_attempts
+          not_exists: true
+---
+id: COMP_REL_009
+title: Service dependency is optional but not handled
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Service dependency is optional but not handled"
+description: |
+  `required: false` lets the service start without its dependency; the service
+  must then cope with it being absent.
+remediation: |
+  Make sure the service degrades gracefully, or remove `required: false`.
+query:
+  path: depends_on.*.required
+  equals: false
+---
+id: COMP_REL_010
+title: Single instance critical service detected
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' — Single instance critical service detected"
+description: |
+  A service labelled `tier: critical` runs as a single replica. Uses the
+  organisation-specific `tier` label; enable the rule if you use that
+  convention.
+remediation: |
+  Run at least two replicas, or `deploy.mode: global`.
+when:
+  path: labels.tier
+  equals: critical
+query:
+  all:
+    - not:
+        path: deploy.mode
+        equals: global
+    - any:
+        - path: deploy.replicas
+          not_exists: true
+        - path: deploy.replicas
+          lt: 2
+---
+id: COMP_REL_011
+title: On-failure restart has no retry limit or more than 5 retries
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — On-failure restart has no retry limit or more than 5 retries"
+description: |
+  An unbounded on-failure policy retries a broken container forever, hiding
+  the failure and wasting resources.
+remediation: |
+  Bound the retries: `restart: on-failure:5`, or
+  `deploy.restart_policy.max_attempts: 5`.
+query:
+  any:
+    - path: restart
+      regex: '^on-failure(:([6-9]|[1-9][0-9]+))?$'
+    - all:
+        - path: deploy.restart_policy.condition
+          equals: on-failure
+        - any:
+            - path: deploy.restart_policy.max_attempts
+              not_exists: true
+            - path: deploy.restart_policy.max_attempts
+              greater_than: 5
+---
+id: COMP_REL_012
+title: Fixed container name prevents scaling
+severity: INFO
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Fixed container name prevents scaling"
+description: |
+  A fixed container_name makes `docker compose up --scale` fail and blocks
+  rolling updates.
+remediation: |
+  Remove `container_name`; address the service by its service name on the
+  network.
+query:
+  path: container_name
+  exists: true
+---
+id: COMP_REL_013
+title: Init process is not enabled
+severity: INFO
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Init process is not enabled"
+description: |
+  Without an init process, zombie processes are never reaped and signals may
+  not reach child processes.
+remediation: |
+  Set `init: true` (unless the image ships its own init such as tini).
+query:
+  any:
+    - path: init
+      not_exists: true
+    - path: init
+      equals: false
+---
+id: COMP_REL_014
+title: Dependency waits for healthy state but target has no healthcheck
+severity: ERROR
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' waits for '{{ .Captures.dep }}' to be healthy, but it has no healthcheck"
+description: |
+  `condition: service_healthy` on a dependency without a healthcheck makes
+  `docker compose up` fail.
+remediation: |
+  Add a healthcheck to the dependency.
+query:
+  all:
+    - path: "depends_on.{dep}.condition"
+      equals: service_healthy
+    - any:
+        - path: "_services.{dep}.healthcheck.test"
+          not_exists: true
+        - path: "_services.{dep}.healthcheck.disable"
+          equals: true
+---
+id: COMP_REL_015
+title: Dependency target is missing or disabled by profile
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' depends on '{{ .Captures.dep }}', which is not defined or only starts under a profile"
+description: |
+  A dependency that does not exist, or only starts under a profile the
+  dependent does not share, makes startup fail.
+remediation: |
+  Fix the service name, or add the dependent service to the same profile.
+query:
+  any:
+    - all:
+        - path: "depends_on.{dep}"
+          exists: true
+        - path: "_services.{dep}"
+          not_exists: true
+    - all:
+        - path: "depends_on[{dep}]"
+          exists: true
+        - path: "_services.{dep}"
+          not_exists: true
+    - all:
+        - any:
+            - path: "depends_on.{dep}"
+              exists: true
+            - path: "depends_on[{dep}]"
+              exists: true
+        - path: "_services.{dep}.profiles"
+          exists: true
+        - path: profiles
+          not_exists: true
+---
+id: COMP_RES_001
+title: CPU limit is not configured
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — CPU limit is not configured"
+description: |
+  Without a CPU limit, one busy service can starve its neighbours on the host.
+remediation: |
+  Set `deploy.resources.limits.cpus` (or `cpus`).
+query:
+  all:
+    - path: deploy.resources.limits.cpus
+      not_exists: true
+    - path: cpus
+      not_exists: true
+---
+id: COMP_RES_002
+title: Memory limit is not configured
+severity: WARNING
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Memory limit is not configured"
+pass_message: All services have a memory limit
+description: |
+  Without a memory limit, one leaking container can exhaust host memory and
+  take every other service down.
+remediation: |
+  Set `deploy.resources.limits.memory` (or `mem_limit`).
+query:
+  all:
+    - path: deploy.resources.limits.memory
+      not_exists: true
+    - path: mem_limit
+      not_exists: true
+---
+id: COMP_RES_003
+title: Process limit is not configured
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Process limit is not configured"
+description: |
+  Without a PID limit, a fork bomb or thread leak in one container can exhaust
+  the host's process table.
+remediation: |
+  Set `pids_limit` (or `deploy.resources.limits.pids`).
+query:
+  all:
+    - path: pids_limit
+      not_exists: true
+    - path: deploy.resources.limits.pids
+      not_exists: true
+---
+id: COMP_RES_004
+title: Ulimits are not configured
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Ulimits are not configured"
+description: |
+  Default ulimits (notably open files) are often too low for servers and
+  databases, or too high for untrusted workloads.
+remediation: |
+  Set `ulimits`, at least `nofile`.
+query:
+  path: ulimits
+  not_exists: true
+---
+id: COMP_RES_005
+title: Shared memory size is not configured
+severity: WARNING
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Shared memory size is not configured"
+description: |
+  PostgreSQL and headless browsers need more than Docker's 64 MB default
+  /dev/shm and fail under load without it.
+remediation: |
+  Set `shm_size`, e.g. `256mb`.
+when:
+  path: image
+  regex: '(^|/)(postgres|postgresql|postgis|timescaledb[a-z-]*|oracle/database|selenium/[a-z-]+|browserless/chrome|[a-z-]*chrom(e|ium)[a-z-]*)(:|@|$)'
+query:
+  path: shm_size
+  not_exists: true
+---
+id: COMP_RES_006
+title: Resource reservations are not configured
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Resource reservations are not configured"
+description: |
+  Reservations tell the scheduler what a service needs; without them hosts get
+  overcommitted.
+remediation: |
+  Set `deploy.resources.reservations`.
+query:
+  all:
+    - path: deploy.resources.reservations
+      not_exists: true
+    - path: mem_reservation
+      not_exists: true
+---
+id: COMP_RES_008
+title: OOM killer disabled without memory limit
+severity: ERROR
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — OOM killer disabled without memory limit"
+description: |
+  With the OOM killer disabled and no memory limit, a leak hangs the whole
+  host instead of killing one container.
+remediation: |
+  Remove `oom_kill_disable`, or set a memory limit.
+query:
+  all:
+    - path: oom_kill_disable
+      equals: true
+    - path: deploy.resources.limits.memory
+      not_exists: true
+    - path: mem_limit
+      not_exists: true
+---
+id: COMP_RES_009
+title: Container is protected from the OOM killer
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Container is protected from the OOM killer"
+description: |
+  A negative oom_score_adj makes the kernel kill other processes, possibly
+  system ones, before this container.
+remediation: |
+  Remove `oom_score_adj` or set it to 0 or higher.
+query:
+  path: oom_score_adj
+  lt: 0
+---
+id: COMP_RES_010
+title: Resource reservation exceeds limit
+severity: WARNING
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Resource reservation exceeds limit"
+description: |
+  A reservation larger than the limit can never be satisfied and is a
+  configuration mistake.
+remediation: |
+  Make reservations smaller than or equal to limits.
+query:
+  any:
+    - path: deploy.resources.reservations.memory
+      gt_ref: deploy.resources.limits.memory
+    - path: deploy.resources.reservations.cpus
+      gt_ref: deploy.resources.limits.cpus
+    - path: mem_reservation
+      gt_ref: mem_limit
+---
+id: COMP_RES_011
+title: Swap usage is not controlled
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Swap usage is not controlled"
+description: |
+  With a memory limit but no memswap_limit the container may use as much swap
+  again, which hides memory pressure and slows the host.
+remediation: |
+  Set `memswap_limit` equal to the memory limit to disable swap.
+when:
+  any:
+    - path: deploy.resources.limits.memory
+      exists: true
+    - path: mem_limit
+      exists: true
+query:
+  path: memswap_limit
+  not_exists: true
+---
+id: COMP_NET_001
+title: Database port is exposed publicly
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Database port is exposed publicly ({{ .Value }})"
+pass_message: Database ports are not published on all interfaces
+description: |
+  A database or broker port published on all interfaces is reachable from any
+  network the host is attached to. (Services running a known database image
+  are reported by the COMP_DB_* rules instead.)
+remediation: |
+  Remove the port mapping and connect over the Compose network, or bind to
+  localhost: `127.0.0.1:5432:5432`.
+when:
+  not:
+    path: image
+    regex: '(^|/)(postgres|postgresql|postgis|timescaledb[a-z-]*|mysql|mysql-server|mariadb|percona|percona-server|redis|redis-stack|redis-stack-server|valkey|keydb|mongo|mongodb|mongodb-community-server|mongodb-enterprise-server|elasticsearch|opensearch|rabbitmq)(:|@|$)'
+query:
+  path: ports.*
+  where:
+    all:
+      - path: "@"
+        regex: '^(\[[^\]]*\]|[^:]*):[^:]*:(5432|3306|1433|1521|27017|6379|9200|9300|5672|9042|11211|5984|8086|7687|26257)/'
+      - not:
+          path: "@"
+          regex: '^(127\.0\.0\.1|\[::1\]|localhost):'
+---
+id: COMP_NET_002
+title: Service is bound to all network interfaces
+severity: INFO
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Service is bound to all network interfaces ({{ .Value }})"
+description: |
+  Ports published without a host IP listen on every interface of the host.
+remediation: |
+  Bind to a specific interface (`127.0.0.1:8080:8080`) unless the port must be
+  public.
+query:
+  path: ports.*
+  regex: '^(0\.0\.0\.0|\[::\])?:'
+---
+id: COMP_NET_003
+title: Default network is used
+severity: INFO
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Default network is used"
+description: |
+  On the default network every service can reach every other; there is no
+  segmentation.
+remediation: |
+  Declare networks and attach each service only to the ones it needs.
+query:
+  all:
+    - path: networks
+      not_exists: true
+    - path: network_mode
+      not_exists: true
+---
+id: COMP_NET_004
+title: Internal service is exposed externally
+severity: WARNING
+category: security
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' — Internal service is exposed externally"
+description: |
+  A service labelled `exposure: internal` publishes ports. Uses an
+  organisation-specific label; enable the rule if you use that convention.
+remediation: |
+  Remove the port mapping.
+when:
+  path: labels.exposure
+  equals: internal
+query:
+  path: ports
+  exists: true
+---
+id: COMP_NET_005
+title: Unnecessary published port detected
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Unnecessary published port detected ({{ .Value }})"
+description: |
+  SSH, Docker API, debugger (JVM, Node), pprof and admin UIs should never be
+  published on all interfaces.
+remediation: |
+  Remove the mapping, or bind it to localhost for local debugging.
+query:
+  path: ports.*
+  where:
+    all:
+      - path: "@"
+        regex: '^(\[[^\]]*\]|[^:]*):[^:]*:(22|2375|2376|5005|9229|6060|15672|5601)/'
+      - not:
+          path: "@"
+          regex: '^(127\.0\.0\.1|\[::1\]|localhost):'
+---
+id: COMP_NET_007
+title: Network segmentation is not configured
+severity: INFO
+category: security
+target: compose
+resource: project
+message: "Project '{{ .Resource.Name }}' — Network segmentation is not configured"
+description: |
+  No network is marked `internal`, so every network has outbound access;
+  backends such as databases usually should not.
+remediation: |
+  Put backend services on a network with `internal: true`.
+query:
+  not:
+    path: networks.*.internal
+    equals: true
+---
+id: COMP_NET_008
+title: Legacy container links are used
+severity: WARNING
+category: maintainability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Legacy container links are used"
+description: |
+  `links` is a legacy feature; service names already resolve on user-defined
+  networks.
+remediation: |
+  Remove `links` and use networks.
+query:
+  any:
+    - path: links
+      exists: true
+    - path: external_links
+      exists: true
+---
+id: COMP_NET_009
+title: Published port range detected
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Published port range detected ({{ .Value }})"
+description: |
+  Publishing port ranges usually exposes far more than intended.
+remediation: |
+  Publish individual ports.
+query:
+  path: ports.*
+  regex: '^(\[[^\]]*\]|[^:]*):[0-9]+-[0-9]+:'
+---
+id: COMP_NET_010
+title: Network namespace shared with another container
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Network namespace shared with another container"
+description: |
+  Sharing another container's network namespace removes the network boundary
+  between them.
+remediation: |
+  Use a shared network instead, unless this is a deliberate sidecar.
+query:
+  path: network_mode
+  regex: '^(container|service):'
+---
+id: COMP_SECRET_001
+title: Plaintext secret detected in compose file
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Plaintext secret detected in compose file"
+pass_message: No plaintext secrets in environment variables
+description: |
+  A literal password in the compose file ends up in version control, CI logs
+  and `docker inspect`.
+remediation: |
+  Use Docker secrets (`secrets:` + `*_FILE` variables) or interpolate from the
+  environment: `${DB_PASSWORD:?}`.
+query:
+  any:
+    - path: environment.*
+      where:
+        all:
+          - path: "@"
+            regex: '(?i)^[a-z0-9_]*(password|passwd|pwd|secret)[a-z0-9_]*=.+'
+          - not:
+              path: "@"
+              regex: '(?i)^[a-z0-9_]*_FILE='
+          - not:
+              path: "@"
+              regex: '^[^=]*=\$(\{|[A-Za-z_])'
+    - path: environment.*
+      regex: '(?i)^[a-z0-9_]+=[a-z][a-z0-9+.-]*://[^/:@\s]+:[^$@\s][^@\s]*@'
+---
+id: COMP_SECRET_002
+title: Hardcoded token or API key in environment
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Hardcoded token or API key in environment"
+description: |
+  A literal token or API key in the compose file ends up in version control
+  and `docker inspect`.
+remediation: |
+  Use Docker secrets, or interpolate the value from the environment.
+query:
+  path: environment.*
+  where:
+    all:
+      - path: "@"
+        regex: '(?i)^[a-z0-9_]*(token|api_?key|private_?key|access_?key|client_?secret|credentials?)[a-z0-9_]*=.+'
+      - not:
+          path: "@"
+          regex: '(?i)^[a-z0-9_]*_FILE='
+      - not:
+          path: "@"
+          regex: '^[^=]*=\$(\{|[A-Za-z_])'
+---
+id: COMP_SECRET_003
+title: Secret passed through environment variable instead of Docker secrets
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Secret passed through environment variable instead of Docker secrets"
+description: |
+  Environment variables are visible in `docker inspect`, in /proc and to every
+  process in the container, and often leak into logs and crash reports.
+remediation: |
+  Mount the value as a Docker secret and read it from a file (`*_FILE`
+  variables).
+query:
+  all:
+    - path: environment.*
+      where:
+        all:
+          - path: "@"
+            regex: '(?i)^[a-z0-9_]*(password|passwd|secret|token|api_?key|private_?key|access_?key)[a-z0-9_]*=\$'
+          - not:
+              path: "@"
+              regex: '(?i)^[a-z0-9_]*_FILE='
+    - path: secrets
+      not_exists: true
+---
+id: COMP_SECRET_004
+title: Secret value appears hardcoded
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Secret value appears hardcoded"
+description: |
+  Long high-entropy literals and embedded private keys are almost always
+  credentials.
+remediation: |
+  Move the value into a Docker secret.
+query:
+  any:
+    - path: environment.*
+      regex: '^[A-Za-z0-9_]+=[A-Za-z0-9+_\-][A-Za-z0-9+/_\-]{31,}={0,2}$'
+    - path: "**"
+      regex: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+---
+id: COMP_SECRET_006
+title: Cloud access key detected
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Cloud access key detected"
+description: |
+  AWS, GCP and Azure credentials in the compose file give anyone with
+  repository access your cloud account.
+remediation: |
+  Revoke the key, then use instance roles, workload identity or Docker
+  secrets.
+query:
+  path: "**"
+  regex: '(AKIA|ASIA)[0-9A-Z]{16}|(?i:aws_secret_access_key)\s*[=:]\s*[A-Za-z0-9/+=]{40}|AIza[0-9A-Za-z_\-]{35}|\"type\"\s*:\s*\"service_account\"|AccountKey=[A-Za-z0-9+/=]{40,}'
+---
+id: COMP_SECRET_007
+title: JWT or API token detected
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — JWT or API token detected"
+description: |
+  Recognisable token formats (JWT, GitHub, Slack, Stripe, OpenAI-style,
+  GitLab) found in the file.
+remediation: |
+  Revoke the token and load it from a secret at runtime.
+query:
+  path: "**"
+  regex: 'eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{32,}|glpat-[A-Za-z0-9_-]{20}'
+---
+id: COMP_SECRET_008
+title: Secret hardcoded in variable default value
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Secret hardcoded in variable default value"
+description: |
+  `${DB_PASSWORD:-changeme}` silently falls back to a known password whenever
+  the variable is unset.
+remediation: |
+  Use `${DB_PASSWORD:?DB_PASSWORD must be set}` so a missing value fails
+  loudly.
+query:
+  path: "**"
+  regex: '(?i)\$\{[a-z0-9_]*(password|passwd|pwd|secret|token|api_?key|private_?key|access_?key)[a-z0-9_]*:?-[^}]+\}'
+---
+id: COMP_SECRET_009
+title: Required secret variable does not fail when unset
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Required secret variable does not fail when unset"
+description: |
+  `${DB_PASSWORD}` silently becomes an empty string when unset, which some
+  services accept as "no password".
+remediation: |
+  Use `${DB_PASSWORD:?DB_PASSWORD must be set}`.
+query:
+  path: environment.*
+  regex: '(?i)^[a-z0-9_]*(password|passwd|pwd|secret|token|api_?key|private_?key|access_?key)[a-z0-9_]*=\$(\{[a-z0-9_]+\}|[a-z_][a-z0-9_]*)$'
+---
+id: COMP_SECRET_010
+title: Secret passed as command line argument
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Secret passed as command line argument"
+description: |
+  Command-line arguments are visible to every user on the host through `ps`
+  and in `docker inspect`.
+remediation: |
+  Pass secrets through files (Docker secrets) instead of arguments.
+query:
+  any:
+    - path: command
+      regex: '(?i)(--(password|passwd|pass|secret|token|api-?key|requirepass)[= ][^$\s]\S*|\s-p[^0-9$\s]\S*)'
+    - path: entrypoint
+      regex: '(?i)(--(password|passwd|pass|secret|token|api-?key|requirepass)[= ][^$\s]\S*|\s-p[^0-9$\s]\S*)'
+    - path: healthcheck.test
+      regex: '(?i)(--(password|passwd|pass|secret|token|api-?key|requirepass)[= ][^$\s]\S*|\s-p[^0-9$\s]\S*)'
+---
+id: COMP_SECRET_011
+title: Docker secret is sourced from an environment variable
+severity: WARNING
+category: security
+target: compose
+resource: project
+message: "Project '{{ .Resource.Name }}' — Docker secret is sourced from an environment variable"
+description: |
+  A secret defined with `environment:` is only as safe as the environment
+  variable it copies.
+remediation: |
+  Source secrets from files managed by your secret store.
+query:
+  path: secrets.*.environment
+  exists: true
+---
+id: COMP_STOR_001
+title: Database data is not persisted
+severity: ERROR
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Database data is not persisted"
+pass_message: Database data is persisted in volumes
+description: |
+  Without a named volume or bind mount, the database's data lives in the
+  container's writable layer and is lost when the container is recreated.
+remediation: |
+  Mount a named volume on the data directory, e.g.
+  `pgdata:/var/lib/postgresql/data`.
+when:
+  path: image
+  regex: '(^|/)(postgres|postgresql|postgis|timescaledb[a-z-]*|mysql|mariadb|percona|mongo|mongodb-community-server|redis|valkey|elasticsearch|opensearch|rabbitmq|cassandra|mssql/server|clickhouse-server|neo4j|influxdb|couchdb|cockroach)(:|@|$)'
+query:
+  not:
+    path: volumes.*
+    regex: '^(volume|bind):[^:]+:'
+---
+id: COMP_STOR_002
+title: Development bind mount detected
+severity: WARNING
+category: maintainability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Development bind mount detected ({{ .Value }})"
+description: |
+  Writable mounts of relative paths or source code over the app directory are
+  a development setup; in production they make the running code depend on the
+  host checkout.
+remediation: |
+  Bake the code into the image. Configuration files may be mounted read-only
+  (`:ro`).
+query:
+  path: volumes.*
+  where:
+    all:
+      - any:
+          - path: "@"
+            regex: '^bind:(\.{1,2}(/|:)|~)'
+          - path: "@"
+            regex: '^bind:[^:]+:/(app|src|code|usr/src/app|var/www/html)(/[^:]*)?:'
+      - not:
+          path: "@"
+          regex: '^bind:[^:]*:[^:]*:ro(,|$)'
+---
+id: COMP_STOR_003
+title: Writable host mount detected
+severity: INFO
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Writable host mount detected ({{ .Value }})"
+description: |
+  A writable bind mount lets the container change files on the host.
+remediation: |
+  Mount read-only (`:ro`) unless the service must write there.
+query:
+  path: volumes.*
+  regex: '^bind:[^:]+:[^:]+:rw(,[a-zA-Z]+)*$'
+---
+id: COMP_STOR_004
+title: Anonymous volume used for persistent data
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Anonymous volume used for persistent data ({{ .Value }})"
+description: |
+  Anonymous volumes are hard to identify, back up or reattach, and are easily
+  deleted with `down -v` or `volume prune`.
+remediation: |
+  Use a named volume.
+query:
+  path: volumes.*
+  regex: '^volume::'
+---
+id: COMP_STOR_005
+title: Volume backup strategy not detected
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' — Volume backup strategy not detected"
+description: |
+  A service with a named volume has no `backup.policy` label. Uses an
+  organisation-specific label; enable the rule if you use that convention.
+remediation: |
+  Add a `backup.policy` label describing how the data is backed up.
+when:
+  path: volumes.*
+  regex: '^volume:[^:]+:'
+query:
+  path: labels."backup.policy"
+  not_exists: true
+---
+id: COMP_STOR_006
+title: Critical data volume lacks redundancy
+severity: WARNING
+category: reliability
+target: compose
+resource: project
+enabled: false
+message: "Project '{{ .Resource.Name }}' — Critical data volume lacks redundancy"
+description: |
+  A volume labelled `tier: critical` uses the local driver, so it lives on a
+  single disk. Uses an organisation-specific label; enable the rule if you use
+  that convention.
+remediation: |
+  Use a replicated volume driver or storage backend.
+query:
+  path: volumes.*
+  where:
+    all:
+      - path: labels.tier
+        equals: critical
+      - any:
+          - path: driver
+            not_exists: true
+          - path: driver
+            equals: local
+---
+id: COMP_STOR_007
+title: Volume is writable from multiple services
+severity: WARNING
+category: reliability
+target: compose
+resource: project
+message: "Project '{{ .Resource.Name }}': volume at {{ .Path }} is writable from several services"
+description: |
+  Several services writing to the same volume risks corruption unless the
+  application coordinates access.
+remediation: |
+  Give each writer its own volume, or mount it read-only in all but one
+  service.
+query:
+  path: _index.volume_writers.*
+  length_gte: 2
+---
+id: COMP_STOR_008
+title: Volumes inherited from another container
+severity: WARNING
+category: maintainability
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Volumes inherited from another container"
+description: |
+  `volumes_from` creates hidden coupling between services.
+remediation: |
+  Mount the named volumes explicitly.
+query:
+  path: volumes_from
+  exists: true
+---
+id: COMP_STOR_009
+title: Volume declaration and usage do not match
+severity: WARNING
+category: maintainability
+target: compose
+resource: project
+message: "Project '{{ .Resource.Name }}': volume '{{ .Captures.vol }}' is declared but unused, or used but not declared"
+description: |
+  A declared volume nobody mounts is dead configuration; a mounted named
+  volume that is not declared fails at startup.
+remediation: |
+  Remove unused volume declarations, and declare every named volume you mount.
+query:
+  any:
+    - all:
+        - path: "volumes.{vol}"
+          exists: true
+        - path: "_index.volume_mounts.{vol}"
+          not_exists: true
+    - all:
+        - path: "_index.volume_mounts.{vol}"
+          exists: true
+        - path: "volumes.{vol}"
+          not_exists: true
+---
+id: COMP_LOG_002
+title: Log file count is not limited
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Log file count is not limited"
+description: |
+  Without max-file, rotated json-file logs accumulate.
+remediation: |
+  Set `logging.options.max-file`, e.g. `"3"`.
+when:
+  any:
+    - path: logging.driver
+      not_exists: true
+    - path: logging.driver
+      equals: json-file
+query:
+  path: logging.options.max-file
+  not_exists: true
+---
+id: COMP_LOG_003
+title: Unlimited log growth possible
+severity: WARNING
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Unlimited log growth possible"
+pass_message: Container logs are rotated
+description: |
+  The default json-file driver never rotates logs; a chatty service eventually
+  fills the disk.
+remediation: |
+  Set `logging.options.max-size` (and `max-file`), or use a centralised
+  driver.
+when:
+  any:
+    - path: logging.driver
+      not_exists: true
+    - path: logging.driver
+      equals: json-file
+query:
+  path: logging.options.max-size
+  not_exists: true
+---
+id: COMP_LOG_004
+title: Centralized logging not detected
+severity: INFO
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Centralized logging not detected"
+description: |
+  Logs kept only on the host are lost with it and are hard to search across
+  services.
+remediation: |
+  Ship logs to a central system with a logging driver or a collector.
+query:
+  any:
+    - path: logging.driver
+      not_exists: true
+    - path: logging.driver
+      not_in: [fluentd, gelf, syslog, journald, awslogs, gcplogs, splunk, loki, logentries, etwlogs]
+---
+id: COMP_LOG_005
+title: Logging is disabled
+severity: WARNING
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Logging is disabled"
+description: |
+  With the none driver there is no record of what the service did when
+  something goes wrong.
+remediation: |
+  Use a real logging driver.
+query:
+  path: logging.driver
+  equals: none
+---
+id: COMP_DB_001
+title: PostgreSQL is exposed publicly
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — PostgreSQL is exposed publicly ({{ .Value }})"
+description: |
+  PostgreSQL publishes a port on all interfaces, whatever the port number, so
+  it is reachable from outside the host.
+remediation: |
+  Remove the port mapping and connect over the Compose network, or bind to
+  localhost.
+when:
+  path: image
+  regex: '(^|/)(postgres|postgresql|postgis|timescaledb[a-z-]*)(:|@|$)'
+query:
+  path: ports.*
+  where:
+    not:
+      path: "@"
+      regex: '^(127\.0\.0\.1|\[::1\]|localhost):'
+---
+id: COMP_DB_002
+title: MySQL is exposed publicly
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — MySQL is exposed publicly ({{ .Value }})"
+description: |
+  MySQL publishes a port on all interfaces, whatever the port number, so it is
+  reachable from outside the host.
+remediation: |
+  Remove the port mapping and connect over the Compose network, or bind to
+  localhost.
+when:
+  path: image
+  regex: '(^|/)(mysql|mysql-server|mariadb|percona|percona-server)(:|@|$)'
+query:
+  path: ports.*
+  where:
+    not:
+      path: "@"
+      regex: '^(127\.0\.0\.1|\[::1\]|localhost):'
+---
+id: COMP_DB_003
+title: Redis is exposed publicly
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Redis is exposed publicly ({{ .Value }})"
+description: |
+  Redis publishes a port on all interfaces, whatever the port number, so it is
+  reachable from outside the host.
+remediation: |
+  Remove the port mapping and connect over the Compose network, or bind to
+  localhost.
+when:
+  path: image
+  regex: '(^|/)(redis|redis-stack|redis-stack-server|valkey|keydb)(:|@|$)'
+query:
+  path: ports.*
+  where:
+    not:
+      path: "@"
+      regex: '^(127\.0\.0\.1|\[::1\]|localhost):'
+---
+id: COMP_DB_004
+title: MongoDB is exposed publicly
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — MongoDB is exposed publicly ({{ .Value }})"
+description: |
+  MongoDB publishes a port on all interfaces, whatever the port number, so it
+  is reachable from outside the host.
+remediation: |
+  Remove the port mapping and connect over the Compose network, or bind to
+  localhost.
+when:
+  path: image
+  regex: '(^|/)(mongo|mongodb|mongodb-community-server|mongodb-enterprise-server)(:|@|$)'
+query:
+  path: ports.*
+  where:
+    not:
+      path: "@"
+      regex: '^(127\.0\.0\.1|\[::1\]|localhost):'
+---
+id: COMP_DB_005
+title: Elasticsearch is exposed publicly
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Elasticsearch is exposed publicly ({{ .Value }})"
+description: |
+  Elasticsearch publishes a port on all interfaces, whatever the port number,
+  so it is reachable from outside the host.
+remediation: |
+  Remove the port mapping and connect over the Compose network, or bind to
+  localhost.
+when:
+  path: image
+  regex: '(^|/)(elasticsearch|opensearch)(:|@|$)'
+query:
+  path: ports.*
+  where:
+    not:
+      path: "@"
+      regex: '^(127\.0\.0\.1|\[::1\]|localhost):'
+---
+id: COMP_DB_006
+title: RabbitMQ is exposed publicly
+severity: ERROR
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — RabbitMQ is exposed publicly ({{ .Value }})"
+description: |
+  RabbitMQ publishes a port on all interfaces, whatever the port number, so it
+  is reachable from outside the host.
+remediation: |
+  Remove the port mapping and connect over the Compose network, or bind to
+  localhost.
+when:
+  path: image
+  regex: '(^|/)rabbitmq(:|@|$)'
+query:
+  path: ports.*
+  where:
+    not:
+      path: "@"
+      regex: '^(127\.0\.0\.1|\[::1\]|localhost):'
+---
+id: COMP_DB_008
+title: Database backup strategy not detected
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' — Database backup strategy not detected"
+description: |
+  A database service has no `backup.policy` label. Uses an organisation-
+  specific label; enable the rule if you use that convention.
+remediation: |
+  Add a `backup.policy` label and a backup job.
+when:
+  path: image
+  regex: '(^|/)(postgres|postgresql|postgis|timescaledb[a-z-]*|mysql|mariadb|percona|mongo|mongodb-community-server|redis|valkey|elasticsearch|opensearch|rabbitmq|cassandra|mssql/server|clickhouse-server|neo4j|influxdb|couchdb|cockroach)(:|@|$)'
+query:
+  path: labels."backup.policy"
+  not_exists: true
+---
+id: COMP_DB_009
+title: Redis without password
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Redis without password"
+pass_message: Redis services require a password
+description: |
+  Redis accepts unauthenticated connections by default; anyone who can reach
+  it can read and change all data.
+remediation: |
+  Start Redis with `--requirepass` read from a secret, or configure ACLs.
+when:
+  path: image
+  regex: '(^|/)(redis|redis-stack|redis-stack-server|valkey|keydb)(:|@|$)'
+query:
+  all:
+    - not:
+        path: command
+        regex: 'requirepass|--aclfile'
+    - not:
+        path: environment.*
+        regex: '^REDIS_PASSWORD(_FILE)?='
+---
+id: COMP_PROD_001
+title: Production service uses development settings
+severity: WARNING
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Production service uses development settings"
+description: |
+  Debug modes and development servers leak stack traces, disable caching and
+  are not built for production traffic.
+remediation: |
+  Use production settings, and keep development overrides in
+  `compose.override.yaml`.
+query:
+  any:
+    - path: environment.*
+      regex: '(?i)^(node_env|app_env|env|environment|flask_env|rails_env|rack_env|mix_env|aspnetcore_environment|spring_profiles_active)=.*(dev|local|test)'
+    - path: environment.*
+      regex: '(?i)^(debug|app_debug|flask_debug|django_debug)=(1|true|yes|on)$'
+    - path: command
+      regex: '(--reload|--debug|--watch|nodemon|runserver|npm run dev|yarn dev|pnpm dev)'
+---
+id: COMP_PROD_002
+title: Backup strategy not detected
+severity: WARNING
+category: reliability
+target: compose
+resource: project
+enabled: false
+message: "Project '{{ .Resource.Name }}' — Backup strategy not detected"
+description: |
+  No backup tool or `backup.policy` label found in the project. Backups often
+  live outside the compose file, so this is a heuristic; enable it if backups
+  are expected in the same file.
+remediation: |
+  Add a backup service or document the policy with labels.
+query:
+  all:
+    - not:
+        path: services.*.labels."backup.policy"
+        exists: true
+    - not:
+        path: services.*.image
+        regex: '(restic|borg|velero|duplicati|docker-volume-backup|postgres-backup|pgbackrest|wal-g|barman)'
+---
+id: COMP_PROD_003
+title: Monitoring integration not detected
+severity: WARNING
+category: operational
+target: compose
+resource: project
+enabled: false
+message: "Project '{{ .Resource.Name }}' — Monitoring integration not detected"
+description: |
+  No monitoring agent or scrape label found in the project. Monitoring is
+  often external, so this is a heuristic; enable it if agents are expected in
+  the same file.
+remediation: |
+  Add a monitoring agent or `prometheus.io/scrape` labels.
+query:
+  all:
+    - not:
+        path: services.*.image
+        regex: '(prometheus|node-exporter|cadvisor|grafana/agent|grafana/alloy|datadog/agent|newrelic|opentelemetry-collector|telegraf|netdata|zabbix)'
+    - not:
+        path: services.*.labels."prometheus.io/scrape"
+        equals: "true"
+---
+id: COMP_PROD_004
+title: Alerting integration not detected
+severity: WARNING
+category: operational
+target: compose
+resource: project
+enabled: false
+message: "Project '{{ .Resource.Name }}' — Alerting integration not detected"
+description: |
+  No alerting component found in the project. Alerting is often external, so
+  this is a heuristic; enable it if alerting is expected in the same file.
+remediation: |
+  Add an alerting component.
+query:
+  not:
+    path: services.*.image
+    regex: '(alertmanager|grafana/oncall|datadog/agent|zabbix|uptime-kuma|gatus)'
+---
+id: COMP_PROD_005
+title: Service ownership labels missing
+severity: WARNING
+category: maintainability
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' — Service ownership labels missing"
+description: |
+  Without an owner or team label nobody knows who to page. Uses organisation-
+  specific labels; enable the rule if you use that convention.
+remediation: |
+  Add an `owner` or `team` label.
+query:
+  all:
+    - path: labels.owner
+      not_exists: true
+    - path: labels.team
+      not_exists: true
+---
+id: COMP_PROD_006
+title: Environment metadata missing
+severity: WARNING
+category: maintainability
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' — Environment metadata missing"
+description: |
+  Services without an `environment` label are hard to tell apart across
+  stages. Uses an organisation-specific label; enable the rule if you use that
+  convention.
+remediation: |
+  Add an `environment` label.
+query:
+  path: labels.environment
+  not_exists: true
+---
+id: COMP_PROD_007
+title: Recovery strategy not detected
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' — Recovery strategy not detected"
+description: |
+  A `tier: critical` service has neither a rollback configuration nor a
+  runbook label. Uses organisation-specific labels; enable the rule if you use
+  that convention.
+remediation: |
+  Add `deploy.rollback_config` and a `runbook` label.
+when:
+  path: labels.tier
+  equals: critical
+query:
+  all:
+    - path: deploy.rollback_config
+      not_exists: true
+    - path: labels.runbook
+      not_exists: true
+---
+id: COMP_PROD_008
+title: Critical service is a single point of failure
+severity: WARNING
+category: reliability
+target: compose
+resource: service
+enabled: false
+message: "Service '{{ .Resource.Name }}' — Critical service is a single point of failure"
+description: |
+  A `tier: critical` service runs one replica with no failover label. Uses
+  organisation-specific labels; enable the rule if you use that convention.
+remediation: |
+  Run at least two replicas, or document the failover mechanism.
+when:
+  path: labels.tier
+  equals: critical
+query:
+  all:
+    - not:
+        path: deploy.mode
+        equals: global
+    - any:
+        - path: deploy.replicas
+          not_exists: true
+        - path: deploy.replicas
+          lt: 2
+    - path: labels.failover
+      not_exists: true
+---
+id: COMP_PROD_009
+title: High availability configuration not detected
+severity: INFO
+category: reliability
+target: compose
+resource: project
+message: "Project '{{ .Resource.Name }}' — High availability configuration not detected"
+description: |
+  No service in the project runs more than one replica, so every host or
+  container failure is an outage.
+remediation: |
+  Run critical services with `deploy.replicas: 2` or more.
+query:
+  all:
+    - not:
+        path: services.*.deploy.replicas
+        gte: 2
+    - not:
+        path: services.*.deploy.mode
+        equals: global
+---
+id: COMP_PROD_010
+title: Disaster recovery readiness not detected
+severity: WARNING
+category: reliability
+target: compose
+resource: project
+enabled: false
+message: "Project '{{ .Resource.Name }}' — Disaster recovery readiness not detected"
+description: |
+  No `dr.policy` label anywhere in the project. Uses an organisation-specific
+  label; enable the rule if you use that convention.
+remediation: |
+  Document the disaster recovery policy with `dr.policy` labels.
+query:
+  all:
+    - not:
+        path: services.*.labels."dr.policy"
+        exists: true
+    - not:
+        path: volumes.*.labels."dr.policy"
+        exists: true
+---
+id: COMP_PROD_011
+title: Obsolete version attribute is used
+severity: INFO
+category: maintainability
+target: compose
+resource: project
+message: "Project '{{ .Resource.Name }}' — Obsolete version attribute is used"
+description: |
+  The top-level `version` key is obsolete in the Compose Specification and
+  ignored by Compose v2.
+remediation: |
+  Remove `version:`.
+query:
+  path: version
+  exists: true
+---
+id: COMP_PROD_012
+title: Project name is not defined
+severity: INFO
+category: maintainability
+target: compose
+resource: project
+message: "Project '{{ .Resource.Name }}' — Project name is not defined"
+description: |
+  Without `name`, the project name comes from the directory, so the same file
+  creates different resource names in different checkouts.
+remediation: |
+  Set a top-level `name:`.
+query:
+  path: name
+  not_exists: true
+---
+id: COMP_PROD_013
+title: Interactive or development-only settings enabled
+severity: WARNING
+category: operational
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Interactive or development-only settings enabled"
+description: |
+  `develop` (compose watch), `tty` and `stdin_open` are development
+  conveniences.
+remediation: |
+  Move them into a development override file.
+query:
+  any:
+    - path: develop
+      exists: true
+    - path: tty
+      equals: true
+    - path: stdin_open
+      equals: true
+---
+id: COMP_PROD_014
+title: Debug or admin tool is not behind a profile
+severity: WARNING
+category: security
+target: compose
+resource: service
+message: "Service '{{ .Resource.Name }}' — Debug or admin tool is not behind a profile"
+description: |
+  Admin UIs and debugging tools (adminer, pgAdmin, mailhog, ...) should only
+  start on demand; running them always adds an attack surface.
+remediation: |
+  Add the service to a profile, e.g. `profiles: [debug]`.
+when:
+  path: image
+  regex: '(^|/)(adminer|phpmyadmin|pgadmin4?|mongo-express|redis-commander|redisinsight|mailhog|mailpit|dozzle|kafdrop|kafka-ui|swagger-ui|localstack|whoami)(:|@|$)'
+query:
+  path: profiles
+  not_exists: true
