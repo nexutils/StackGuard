@@ -1,0 +1,1744 @@
+# dockerfile rules for StackGuard.
+id: DOCK_SEC_001
+title: Final image runs as root
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: The final image runs as root
+description: |
+  With no non-root USER, the container's main process runs as root. A container
+  escape or app compromise then has root on the host namespace it shares.
+remediation: |
+  Create an unprivileged user and switch to it before CMD/ENTRYPOINT, e.g.
+  `RUN adduser -D app` then `USER app`.
+query:
+  path: final.user
+  matches: '^(root|0)(:.*)?$'
+---
+id: DOCK_SEC_002
+title: No USER instruction sets a non-root user
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: The final image sets no USER, so it runs as root
+description: |
+  A Dockerfile with no USER runs as root by default. Distroless/Chainguard
+  "nonroot" bases already switch users, so they are exempt.
+remediation: |
+  Add a non-root `USER` before CMD/ENTRYPOINT.
+when:
+  path: final.base
+  not_matches: '(:|-)nonroot(@|$|-)'
+query:
+  path: final.user
+  not_exists: true
+---
+id: DOCK_SEC_003
+title: Privileged capability configured with setcap
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: A RUN grants a dangerous file capability with setcap
+description: |
+  Setting capabilities such as cap_sys_admin or cap_net_admin on a binary grants
+  it powers close to root and is a common privilege-escalation vector.
+remediation: |
+  Remove the setcap call. Grant only the capabilities the container needs at
+  runtime with the orchestrator's securityContext/cap_add instead.
+query:
+  path: all.run[*]
+  matches: '(?i)\bsetcap\b[^&;|]*cap_(sys_admin|sys_module|sys_ptrace|sys_rawio|dac_override|dac_read_search|net_admin|net_raw|bpf)'
+---
+id: DOCK_SEC_004
+title: sudo or doas present in the image
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: sudo/doas is installed or invoked in the image
+description: |
+  A container should already run as the right user; shipping sudo widens the
+  attack surface and invites privilege escalation.
+remediation: |
+  Remove sudo/doas. Set the correct USER instead of escalating at runtime.
+query:
+  any:
+    - path: final.packages[*].name
+      in: [sudo, doas]
+    - path: final.run[*]
+      matches: '(^|[;&|]\s*|\s)sudo\s'
+---
+id: DOCK_SEC_005
+title: SSH server present in the image
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: An SSH server is installed or exposed in the image
+description: |
+  Running sshd inside a container is an anti-pattern: it adds an attack surface
+  and a second way in. Use `docker exec` / `kubectl exec` for shell access.
+remediation: |
+  Remove the SSH server package and stop exposing port 22.
+query:
+  any:
+    - path: final.packages[*].name
+      in: [openssh-server, openssh, dropbear, ssh]
+    - path: final.expose
+      contains: "22/tcp"
+    - path: final.cmd.value
+      matches: '(^|[ /])sshd( |$)'
+    - path: final.entrypoint.value
+      matches: '(^|[ /])sshd( |$)'
+---
+id: DOCK_SEC_006
+title: Unnecessary shell installed
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: "An interactive shell is installed in the image ({{ .Value }})"
+description: |
+  Extra interactive shells enlarge the attack surface and are rarely needed by a
+  production service.
+remediation: |
+  Do not install extra shells; rely on the base image's default.
+query:
+  path: final.packages[*].name
+  in: [bash, zsh, fish, tcsh, csh, ksh, mksh]
+---
+id: DOCK_SEC_007
+title: Package manager cache not cleaned
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: A package manager (apk/yum/zypper) install leaves its cache in the layer
+description: |
+  Leaving the package cache in the layer bloats the image and keeps metadata that
+  can widen the attack surface.
+remediation: |
+  Use `apk add --no-cache`, `yum clean all`/`rm -rf /var/cache`, or
+  `--mount=type=cache` in the same RUN as the install.
+query:
+  any:
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\bapk\s[^&;|]*\badd\b'
+          - not:
+              path: "@"
+              matches: '(--no-cache|rm -rf /var/cache/apk|--mount=type=cache)'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\b(yum|dnf|microdnf)\s[^&;|]*\binstall\b'
+          - not:
+              path: "@"
+              matches: '(\b(yum|dnf|microdnf) clean all|rm -rf /var/cache/(yum|dnf)|--mount=type=cache)'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\bzypper\s[^&;|]*\b(in|install)\b'
+          - not:
+              path: "@"
+              matches: '(zypper clean|--mount=type=cache)'
+---
+id: DOCK_SEC_008
+title: Sensitive config file copied into image
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: "A credential or cloud-config file is copied into the image ({{ .Value }})"
+description: |
+  Package-manager and cloud-CLI credential files copied into an image leak tokens
+  to anyone who can pull it.
+remediation: |
+  Do not COPY these files. Provide credentials at build time with
+  `RUN --mount=type=secret` or at runtime.
+query:
+  path: all.copy[*].src[*]
+  matches: '(?i)(^|/)(\.npmrc|\.yarnrc(\.yml)?|\.pypirc|pip\.conf|\.netrc|\.git-credentials|\.gitconfig|\.aws(/|$)|\.azure(/|$)|\.config/gcloud|\.docker/config\.json|\.kube(/|$)|kubeconfig|\.vault-token|\.terraformrc|terraform\.tfstate)$'
+---
+id: DOCK_SEC_009
+title: Private key material handled in the build
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: A private key is written into the image or generated at build time
+description: |
+  A private key embedded in a layer is recoverable from the image even if a later
+  layer removes it.
+remediation: |
+  Never bake private keys into images. Mount them with `RUN --mount=type=secret`
+  or inject them at runtime.
+query:
+  any:
+    - path: all.run[*]
+      matches: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    - path: all.env[*]
+      matches: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    - path: all.run[*]
+      matches: '\bssh-keygen\b'
+---
+id: DOCK_SEC_010
+title: Secret passed as a build argument
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: "A build ARG looks like a secret ({{ .Value }})"
+description: |
+  ARG values are recorded in image history, so a secret passed via --build-arg is
+  readable from the built image.
+remediation: |
+  Use `RUN --mount=type=secret` for build-time secrets instead of ARG.
+query:
+  path: all.arg[*]
+  matches: '(?i)^[a-z0-9_]*(password|passwd|pwd|secret|token|api_?key|private_?key|access_?key|credentials?|auth)[a-z0-9_]*(=|$)'
+---
+id: DOCK_SEC_011
+title: Password hardcoded in an ENV instruction
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: "ENV sets a password to a literal value ({{ .Value }})"
+description: |
+  A password baked into ENV is stored in the image and shown by
+  `docker history`, so anyone who can pull the image can read it.
+remediation: |
+  Inject the secret at runtime, or read it from a file and reference it with a
+  `..._FILE` variable. Never commit the literal value to the image.
+query:
+  path: all.env[*]
+  where:
+    all:
+      - path: "@"
+        matches: '(?i)^[a-z0-9_]*(password|passwd|pwd)[a-z0-9_]*=.+'
+      - not:
+          path: "@"
+          matches: '(?i)^[a-z0-9_]*_file='
+      - not:
+          path: "@"
+          matches: '=\$'
+---
+id: DOCK_SEC_012
+title: Docker socket access likely
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: The image mounts or expects access to the Docker socket
+description: |
+  Access to the Docker socket is effectively root on the host: a process that can
+  reach it can start privileged containers.
+remediation: |
+  Do not grant Docker socket access. Use a rootless builder or a dedicated CI
+  runner instead.
+query:
+  any:
+    - path: all.run[*]
+      matches: 'docker\.sock'
+    - path: final.volume[*]
+      matches: '(docker\.sock|^/var/run/?$)'
+    - path: final.packages[*].name
+      in: [docker, docker-ce, docker-ce-cli, docker.io, docker-cli, moby-engine, moby-cli]
+    - path: final.run[*]
+      matches: '(usermod\s+-a?G\s*\S*docker|addgroup\s+\S+\s+docker|gpasswd\s+-a\s+\S+\s+docker)'
+---
+id: DOCK_SEC_013
+title: setuid/setgid or file capabilities added
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: A RUN adds file capabilities or setuid/setgid bits
+description: |
+  setcap and added setuid/setgid bits let a normal process gain elevated
+  privileges and are common escalation paths.
+remediation: |
+  Avoid setcap and setuid/setgid. Grant privileges at runtime through the
+  orchestrator only when strictly required.
+query:
+  any:
+    - path: final.run[*]
+      matches: '\bsetcap\b'
+    - path: final.run[*]
+      matches: '\bchmod\s+(-\S+\s+)*([ugoa]*\+[rwxX]*s|0?[2-7][0-7]{3})\b'
+---
+id: DOCK_SEC_014
+title: Read-only root filesystem compatibility not ensured
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+# Organisation-specific label; off by default. Enable via enabled_rules.
+enabled: false
+message: The image does not declare read-only-rootfs compatibility
+description: |
+  Running with a read-only root filesystem needs writable paths declared as
+  volumes (tmp, caches, logs) or an explicit compatibility label.
+remediation: |
+  Declare writable paths with VOLUME, or set the
+  `com.example.readonly-rootfs=true` label (adjust the key to your convention).
+query:
+  all:
+    - not:
+        path: final.volume[*]
+        matches: '^/(tmp|var/tmp|run|var/run|var/cache|var/log)(/|$)'
+    - not:
+        path: final.labels["com.example.readonly-rootfs"]
+        equals: "true"
+---
+id: DOCK_SEC_015
+title: setuid/setgid bits not stripped
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: The final stage does not strip setuid/setgid bits (CIS 4.8)
+description: |
+  Leftover setuid/setgid binaries in the image are a privilege-escalation risk
+  if the container is compromised.
+remediation: |
+  In the final stage, strip the bits, e.g.
+  `RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + || true`.
+query:
+  not:
+    path: final.run[*]
+    matches: 'find\s[^&;|]*-perm\s+[/+-]?[246]000[^&;|]*(chmod\s+(a-s|-s|u-s,g-s)|-delete)'
+---
+id: DOCK_IMG_001
+title: Base image uses a floating or latest tag
+severity: ERROR
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: A stage uses a floating or unpinned base image tag
+description: |
+  `image:latest` — or an image with no tag at all — resolves to a different
+  build over time, so the same Dockerfile stops producing the same image.
+remediation: |
+  Pin an explicit version tag, ideally with a digest:
+  `FROM node:20.11-alpine@sha256:...`.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: base_stage
+        equals: false
+      - path: base
+        not_equals: scratch
+      - any:
+          - path: base
+            matches: ':latest(@|$)'
+          - path: base
+            not_matches: '(:[^/:@]+|@sha256:[a-f0-9]{64})$'
+---
+id: DOCK_IMG_002
+title: Base image tag is a moving target
+severity: ERROR
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: A stage pins only a channel or major/minor tag, with no digest
+description: |
+  Channel names (stable, lts, edge) and major-only or major.minor tags move as
+  new releases ship, so builds are not reproducible.
+remediation: |
+  Pin a full version tag and, ideally, a digest (`@sha256:...`).
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: base_stage
+        equals: false
+      - not:
+          path: base
+          matches: '@sha256:'
+      - path: base
+        matches: ':(stable|lts|edge|main|master|develop|dev|nightly|current|alpine|slim|bookworm|bullseye|trixie|jammy|noble|[0-9]+|[0-9]+\.[0-9]+)(-(alpine|slim|bookworm|bullseye|trixie|jammy|noble))?$'
+---
+id: DOCK_IMG_003
+title: Base image is not pinned by digest
+severity: WARNING
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: A stage does not pin its base image by digest
+description: |
+  A tag can be re-pointed to a different image. A digest (`@sha256:...`) is the
+  only pin that guarantees the exact same bytes on every build.
+remediation: |
+  Append the image digest: `FROM image:tag@sha256:...`.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: base_stage
+        equals: false
+      - path: base
+        not_equals: scratch
+      - not:
+          path: base
+          matches: '@sha256:[a-f0-9]{64}$'
+---
+id: DOCK_IMG_004
+title: Base image from an untrusted registry
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+# The allowlist contains organisation placeholders (# CUSTOMIZE); off by default
+# until you set your own registries.
+enabled: false
+message: "A stage pulls from a registry that is not on the allowlist ({{ .Value }})"
+description: |
+  Pulling from arbitrary registries risks supply-chain compromise. Restrict base
+  images to registries you trust.
+remediation: |
+  Mirror images into a trusted registry and update the allowlist in this rule.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: base_stage
+        equals: false
+      - path: base
+        not_equals: scratch
+      - not:
+          path: base
+          matches: '^((docker\.io/)?(library/)?[a-z0-9._-]+(:|@|$)|gcr\.io/distroless/|cgr\.dev/chainguard/|mcr\.microsoft\.com/|registry\.access\.redhat\.com/|registry\.example\.com/|ghcr\.io/example-org/)'
+---
+id: DOCK_IMG_005
+title: Deprecated base image
+severity: WARNING
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: "A stage uses a deprecated base image ({{ .Value }})"
+description: |
+  Deprecated Docker Hub repositories (e.g. centos, openjdk) and -onbuild variants
+  no longer receive updates.
+remediation: |
+  Move to a maintained image (e.g. eclipse-temurin instead of openjdk).
+query:
+  path: stages[*]
+  where:
+    path: base
+    matches: '((^|/)(centos|openjdk|java|adoptopenjdk|jboss/wildfly)(:|@|$)|-onbuild(@|$))'
+---
+id: DOCK_IMG_006
+title: End-of-life base image
+severity: WARNING
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: "A stage uses an end-of-life base image ({{ .Value }})"
+description: |
+  End-of-life runtimes and distributions stop receiving security fixes. The
+  version lists reflect a mid-2026 snapshot and should be reviewed periodically.
+remediation: |
+  Upgrade to a supported release.
+query:
+  path: stages[*]
+  where:
+    path: base
+    matches: '((^|/)(python:(2|3\.[0-9])([.-]|@|$)|node:([0-9]|1[0-9]|2[01])([.-]|@|$)|ubuntu:(1[0-9]\.[0-9]+|20\.04|trusty|xenial|bionic|focal)([.-]|@|$)|debian:(7|8|9|10|11|wheezy|jessie|stretch|buster|bullseye)([.-]|@|$)|alpine:3\.([0-9]|1[0-9]|20)([.-]|@|$)|php:([0-7]|8\.[01])([.-]|@|$)|ruby:(1|2|3\.[0-2])([.-]|@|$)|golang:1\.([0-9]|1[0-9]|2[0-4])([.-]|@|$)|postgres:([0-9]|1[0-3])([.-]|@|$)|mysql:(5|8\.0)([.-]|@|$))|:[^@]*-(wheezy|jessie|stretch|buster|bullseye)(-|@|$))'
+---
+id: DOCK_IMG_007
+title: Large base image in the final stage
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: The final stage uses a full-size base image instead of a slim variant
+description: |
+  Full distribution and language base images are large, slow to pull, and carry a
+  bigger attack surface than their slim/alpine/distroless variants.
+remediation: |
+  Use a slim, alpine, distroless, or chiseled variant, or a runtime-only image.
+query:
+  all:
+    - path: final.base
+      matches: '(^|/)(ubuntu|debian|centos|fedora|rockylinux|almalinux|amazonlinux|oraclelinux|node|python|ruby|golang|openjdk|eclipse-temurin|php|perl|buildpack-deps|gcc|rust|maven|gradle|dotnet/sdk)(:|@|$)'
+    - not:
+        path: final.base
+        matches: '(slim|alpine|minimal|micro|distroless|chiseled|jre|runtime)'
+---
+id: DOCK_IMG_008
+title: Many consecutive RUN layers
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: The final stage has three or more consecutive RUN instructions
+description: |
+  Each RUN is a layer. A long run of consecutive RUNs that could be chained
+  inflates the image and the build graph.
+remediation: |
+  Combine related RUNs with `&&` into a single layer.
+query:
+  path: final.max_consecutive_run
+  gte: 3
+---
+id: DOCK_BUILD_001
+title: Multi-stage build not used
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: The build compiles or installs dependencies but uses a single stage
+description: |
+  Building in the same stage that ships leaves compilers, dev headers and caches
+  in the final image, bloating it and widening the attack surface.
+remediation: |
+  Use a multi-stage build: compile in a builder stage and COPY only the
+  artifacts into a slim final stage.
+when:
+  path: all.run[*]
+  matches: '\b(npm (ci|install|run build)|yarn (install|build)|pnpm (install|build)|go build|mvn |gradle|cargo build|make\b|gcc |g\+\+ |pip install|poetry install|dotnet (build|publish)|bundle install|composer install)'
+query:
+  not:
+    path: stages
+    length_gte: 2
+---
+id: DOCK_BUILD_002
+title: Build dependencies in the final image
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: "The final image still contains build-only packages ({{ .Value }})"
+description: |
+  Toolchain and -dev packages are needed only to build, not to run. Shipping them
+  enlarges the image and the attack surface.
+remediation: |
+  Install build dependencies in a builder stage, or remove them in the same RUN
+  after building.
+query:
+  path: final.packages[*].name
+  matches: '((-dev|-devel)$|^(build-essential|build-base|autoconf|automake|libtool|pkg-config|pkgconf|cmake|make|git)$)'
+---
+id: DOCK_BUILD_003
+title: Compiler toolchain in the runtime image
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: The final image ships a compiler or SDK
+description: |
+  A compiler in the runtime image lets an attacker build tools in place and adds
+  significant size.
+remediation: |
+  Build in a separate stage and ship a runtime-only (jre/slim/distroless) image.
+query:
+  any:
+    - path: final.packages[*].name
+      matches: '^(gcc|g\+\+|gcc-c\+\+|clang|llvm|golang|golang-go|go|rustc|cargo|default-jdk|openjdk-[0-9]+-jdk(-headless)?|maven|gradle)$'
+    - all:
+        - path: final.base_stage
+          equals: false
+        - path: final.base
+          matches: '((^|/)(gcc|golang|rust|maven|gradle|buildpack-deps|openjdk|dotnet/sdk)(:|@|$)|:[^@]*jdk)'
+---
+id: DOCK_BUILD_004
+title: Temporary download left in the image
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: A downloaded archive or /tmp file is left in the image
+description: |
+  An archive downloaded and not removed in the same RUN, or a COPY into /tmp,
+  leaves dead weight in the layer.
+remediation: |
+  Download, extract and delete within a single RUN; do not COPY into /tmp.
+query:
+  any:
+    - path: final.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\b(curl|wget)\b[^&;|]*\s(-o|-O|--output|-P)\s*\S*\.(tar\.gz|tgz|tar\.xz|tar\.bz2|tar|zip|deb|rpm|whl|jar|apk)\b'
+          - not:
+              path: "@"
+              matches: '\brm\s+(-[a-zA-Z]+\s+)*\S'
+    - path: final.copy[*].dest
+      matches: '^/tmp(/|$)'
+---
+id: DOCK_BUILD_005
+title: Package installation split across layers
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: The final stage installs packages in two or more separate layers
+description: |
+  Each RUN is its own image layer. Splitting installs across several RUNs adds
+  layers and defeats a single cache entry for the package set.
+remediation: |
+  Chain the installs into one RUN with `&&`, so the package set is one layer.
+query:
+  path: final.run[*]
+  matches: '\b(apt(-get)?\s[^&;|]*\binstall|apk\s[^&;|]*\badd|(yum|dnf|microdnf)\s[^&;|]*\binstall|zypper\s[^&;|]*\b(in|install))\b'
+  count_gte: 2
+---
+id: DOCK_BUILD_006
+title: Source copied before dependencies are installed
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: A COPY of the build context precedes dependency installation in the same stage
+description: |
+  Copying the whole context before installing dependencies invalidates the
+  dependency layer on every source change, so dependencies are re-fetched on
+  most builds.
+remediation: |
+  Copy only the manifest/lockfile first, install dependencies, then copy the
+  rest of the source.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: instructions.{c}.cmd
+        in: [COPY, ADD]
+      - path: instructions.{c}.args
+        matches: '^(--\S+\s+)*\.{1,2}/?(\s|$)'
+      - not:
+          path: instructions.{c}.args
+          matches: '--from='
+      - path: instructions.{r}.cmd
+        equals: RUN
+      - path: instructions.{r}.args
+        matches: '\b(npm (ci|install)|yarn( install)?(\s|$)|pnpm install|pip install -r|poetry install|pipenv install|uv sync|bundle install|composer install|go mod download|cargo fetch|mvn [^&;|]*dependency:)'
+      - path: instructions.{r}.index
+        gt_ref: instructions.{c}.index
+---
+id: DOCK_BUILD_007
+title: Wildcard COPY may include unwanted files
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: A COPY from the build context uses a wildcard source
+description: |
+  A wildcard COPY from the context can pull in files you did not intend (secrets,
+  local config), depending on what is present at build time.
+remediation: |
+  Copy explicit paths, and keep a .dockerignore that excludes sensitive files.
+query:
+  path: all.copy[*]
+  where:
+    all:
+      - path: from
+        not_exists: true
+      - path: src[*]
+        matches: '[*?\[]'
+---
+id: DOCK_BUILD_008
+title: Entire build context copied into the image
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: The final stage copies the whole build context
+description: |
+  `COPY . .` in the shipping stage pulls the entire context — including anything
+  not excluded by .dockerignore — into the image.
+remediation: |
+  Copy only the artifacts the runtime needs, ideally with `--from` a build stage.
+query:
+  path: final.copy[*]
+  where:
+    all:
+      - path: from
+        not_exists: true
+      - path: src
+        contains_any: [".", "./"]
+---
+id: DOCK_BUILD_009
+title: Build context likely oversized
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: The build copies the context but .dockerignore does not exclude .git
+description: |
+  Without a .dockerignore that excludes .git (and similar), the whole working
+  tree is sent to the daemon and may land in the image.
+remediation: |
+  Add a .dockerignore that excludes at least `.git`.
+when:
+  path: all.copy[*].src
+  contains_any: [".", "./"]
+query:
+  any:
+    - path: context.dockerignore
+      not_exists: true
+    - not:
+        path: context.dockerignore[*]
+        matches: '^(\*\*/)?/?\.git/?(\*\*?)?$'
+---
+id: DOCK_BUILD_010
+title: No .dockerignore present
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: No .dockerignore was found next to the Dockerfile
+description: |
+  Without a .dockerignore, the entire build context is sent to the daemon, slowing
+  builds and risking accidental inclusion of local files.
+remediation: |
+  Add a .dockerignore excluding VCS metadata, dependencies and local artifacts.
+query:
+  path: context.dockerignore
+  not_exists: true
+---
+id: DOCK_PERF_001
+title: Excessive image layers
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: The final stage has 15 or more RUN/COPY/ADD layers
+description: |
+  Every RUN/COPY/ADD is a layer. A large number of them slows builds and pulls
+  and makes the image harder to cache.
+remediation: |
+  Combine related commands, and copy artifacts in fewer steps.
+query:
+  path: final.layer_count
+  gte: 15
+---
+id: DOCK_PERF_002
+title: Image likely larger than necessary
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: A single-stage build uses a full-size base image
+description: |
+  A single stage on a full base image ships build inputs and a large OS. A
+  multi-stage build on a slim base is usually much smaller.
+remediation: |
+  Adopt a multi-stage build and/or a slim/alpine/distroless base.
+query:
+  all:
+    - not:
+        path: stages
+        length_gte: 2
+    - path: final.base
+      not_matches: '(slim|alpine|minimal|micro|distroless|chiseled|scratch|wolfi|chainguard)'
+---
+id: DOCK_PERF_003
+title: Minimal base image not used
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: The final stage does not use a minimal base image
+description: |
+  Minimal bases (alpine, slim, distroless, chiseled, scratch) cut image size and
+  attack surface substantially.
+remediation: |
+  Switch the final stage to a minimal base variant.
+query:
+  all:
+    - path: final.base_stage
+      equals: false
+    - path: final.base
+      not_matches: '(^scratch$|alpine|slim|minimal|micro|distroless|chiseled|wolfi|chainguard|busybox)'
+---
+id: DOCK_PERF_004
+title: Package manager cache inflates the image
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: A language package install keeps its cache in the layer
+description: |
+  pip/npm/yarn/gem caches left in a layer add size for no runtime benefit.
+remediation: |
+  Disable or clean the cache in the same RUN (e.g. `pip --no-cache-dir`,
+  `npm cache clean`, `yarn cache clean`, `gem install --no-document`), or use
+  `--mount=type=cache`.
+query:
+  any:
+    - all:
+        - path: all.run[*]
+          where:
+            all:
+              - path: "@"
+                matches: '\bpip3?\s+install\b'
+              - not:
+                  path: "@"
+                  matches: '(--no-cache-dir|--mount=type=cache)'
+        - not:
+            path: all.env[*]
+            matches: '^PIP_NO_CACHE_DIR='
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\bnpm\s+(ci|install)\b'
+          - not:
+              path: "@"
+              matches: '(npm cache clean|--mount=type=cache)'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\byarn(\s+install)?(\s|$)'
+          - not:
+              path: "@"
+              matches: '(yarn cache clean|--mount=type=cache)'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\bgem\s+install\b'
+          - not:
+              path: "@"
+              matches: '--no-document'
+---
+id: DOCK_PERF_005
+title: Debugging or editor tools installed
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: "A tool rarely needed at runtime is installed ({{ .Value }})"
+description: |
+  Editors and debugging utilities add size and attack surface and are seldom
+  needed in a production container.
+remediation: |
+  Remove these packages from the runtime image; install them in a debug image if
+  needed.
+query:
+  path: final.packages[*].name
+  in: [vim, vim-tiny, vi, nano, emacs, less, man-db, htop, strace, ltrace, gdb, tcpdump, telnet, iputils-ping, net-tools, dnsutils, bind-tools, traceroute, lsof]
+---
+id: DOCK_PERF_006
+title: Same package installed more than once
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: A package is installed more than once in the final stage
+description: |
+  Installing the same package twice wastes build time and can pull conflicting
+  versions into the image.
+remediation: |
+  Remove the duplicate install; install each package exactly once.
+query:
+  path: final.package_counts.*
+  gte: 2
+---
+id: DOCK_RUNTIME_001
+title: HEALTHCHECK is missing
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: The final image defines no HEALTHCHECK
+description: |
+  Without a HEALTHCHECK, Docker and orchestrators cannot tell a running but
+  broken container from a healthy one.
+remediation: |
+  Add `HEALTHCHECK CMD <command that exercises the service>`, or configure a
+  probe in your orchestrator instead.
+query:
+  any:
+    - path: final.healthcheck
+      not_exists: true
+    - path: final.healthcheck.value
+      equals: NONE
+---
+id: DOCK_RUNTIME_002
+title: STOPSIGNAL is missing
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: The final image sets no STOPSIGNAL
+description: |
+  Without an explicit STOPSIGNAL the container receives SIGTERM, which some apps
+  ignore, leading to hard kills and lost in-flight work on shutdown.
+remediation: |
+  Set `STOPSIGNAL` to the signal your process handles for graceful shutdown.
+query:
+  path: final.stopsignal
+  not_exists: true
+---
+id: DOCK_RUNTIME_003
+title: ENTRYPOINT is missing
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: The final image defines no ENTRYPOINT
+description: |
+  Relying on CMD alone makes the image easy to override into an unintended
+  command and hides the intended entry point.
+remediation: |
+  Define an `ENTRYPOINT` (exec form) for the main process; use CMD for default
+  arguments.
+query:
+  path: final.entrypoint
+  not_exists: true
+---
+id: DOCK_RUNTIME_004
+title: No default command
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: The final image defines neither ENTRYPOINT nor CMD
+description: |
+  An image with no ENTRYPOINT and no CMD has nothing to run and depends entirely
+  on the caller to supply a command.
+remediation: |
+  Define an ENTRYPOINT and/or CMD.
+query:
+  all:
+    - path: final.cmd
+      not_exists: true
+    - path: final.entrypoint
+      not_exists: true
+---
+id: DOCK_RUNTIME_005
+title: Process may not receive signals as PID 1
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: The main process runs via a shell, so it may not receive signals
+description: |
+  Shell-form ENTRYPOINT/CMD wrap the process in `/bin/sh -c`, which does not
+  forward signals, so the app never sees SIGTERM.
+remediation: |
+  Use exec form (`ENTRYPOINT ["app"]`), or `exec` the process in the shell
+  command.
+query:
+  any:
+    - path: final.entrypoint.form
+      equals: shell
+    - all:
+        - path: final.entrypoint
+          not_exists: true
+        - path: final.cmd.form
+          equals: shell
+    - all:
+        - path: final.entrypoint.value
+          matches: '^(/bin/|/usr/bin/)?(ba|da)?sh\s+-c\s'
+        - not:
+            path: final.entrypoint.value
+            matches: '\bexec\b'
+    - all:
+        - path: final.cmd.value
+          matches: '^(/bin/|/usr/bin/)?(ba|da)?sh\s+-c\s'
+        - not:
+            path: final.cmd.value
+            matches: '\bexec\b'
+---
+id: DOCK_RUNTIME_006
+title: No init process configured
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: The image runs no init, so zombie processes may accumulate
+description: |
+  Without a small init (tini, dumb-init, …) as PID 1, reaped child processes can
+  become zombies and signal handling is unreliable.
+remediation: |
+  Use an init such as tini or dumb-init, or the runtime's `--init` flag.
+query:
+  all:
+    - not:
+        path: final.entrypoint.value
+        matches: '(tini|dumb-init|catatonit|s6-svscan|/init(\s|$))'
+    - not:
+        path: final.cmd.value
+        matches: '(tini|dumb-init|catatonit|s6-svscan|/init(\s|$))'
+---
+id: DOCK_RUNTIME_007
+title: Runtime configuration frozen from a build-time value
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: "An ENV value is copied from a build-time variable ({{ .Value }})"
+description: |
+  An ENV whose value interpolates a variable bakes a build-time value into the
+  image, so it cannot be changed at runtime without a rebuild.
+remediation: |
+  Set such configuration at runtime (env or config), not in the Dockerfile.
+query:
+  path: final.env[*]
+  matches: '^[A-Za-z0-9_]+=.*\$\{?[A-Za-z_][A-Za-z0-9_]*'
+---
+id: DOCK_ENV_001
+title: Environment-specific value baked into the image
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+message: "An ENV hardcodes a host/endpoint value ({{ .Value }})"
+description: |
+  Baking a hostname, URL or endpoint into the image ties it to one environment
+  and forces a rebuild to point it elsewhere.
+remediation: |
+  Provide environment-specific endpoints at runtime, not in the Dockerfile.
+query:
+  path: final.env[*]
+  where:
+    all:
+      - path: "@"
+        matches: '(?i)^[a-z0-9_]*(host|hostname|url|uri|endpoint|dsn|addr|address|server)[a-z0-9_]*=.+'
+      - not:
+          path: "@"
+          matches: '=(\$|localhost|127\.0\.0\.1|0\.0\.0\.0)'
+---
+id: DOCK_ENV_002
+title: Secret hardcoded in an ENV instruction
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: "ENV sets a secret to a literal value ({{ .Value }})"
+description: |
+  A secret in ENV is stored in the image and shown by `docker history`, so
+  anyone who can pull the image can read it. This also covers credentials
+  embedded in a connection-string URL.
+remediation: |
+  Inject secrets at runtime, or reference a file via a `..._FILE` variable.
+query:
+  any:
+    - path: all.env[*]
+      where:
+        all:
+          - path: "@"
+            matches: '(?i)^[a-z0-9_]*(secret|private_?key|client_?secret|encryption_?key|signing_?key|master_?key)[a-z0-9_]*=.+'
+          - not:
+              path: "@"
+              matches: '(?i)^[a-z0-9_]*_file='
+          - not:
+              path: "@"
+              matches: '=\$'
+    - path: all.env[*]
+      where:
+        all:
+          - path: "@"
+            matches: '(?i)^[a-z0-9_]+=[a-z][a-z0-9+.-]*://[^/:@\s]+:[^@\s]+@'
+          - not:
+              path: "@"
+              matches: '://[^/:@\s]+:\$'
+---
+id: DOCK_ENV_003
+title: API token hardcoded in an ENV instruction
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: "ENV sets an API token to a literal value ({{ .Value }})"
+description: |
+  Tokens baked into ENV leak to anyone who can pull the image. This also matches
+  well-known token formats (JWT, GitHub, Slack, Stripe, GitLab, npm).
+remediation: |
+  Inject tokens at runtime, or reference a file via a `..._FILE` variable.
+query:
+  any:
+    - path: all.env[*]
+      where:
+        all:
+          - path: "@"
+            matches: '(?i)^[a-z0-9_]*(token|api_?key|auth_?key|access_?key)[a-z0-9_]*=.+'
+          - not:
+              path: "@"
+              matches: '(?i)^[a-z0-9_]*_file='
+          - not:
+              path: "@"
+              matches: '=\$'
+    - path: all.env[*]
+      matches: '=.*(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{32,}|glpat-[A-Za-z0-9_-]{20}|npm_[A-Za-z0-9]{36})'
+---
+id: DOCK_ENV_004
+title: Cloud credential hardcoded in an ENV instruction
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: A cloud credential is baked into an ENV instruction
+description: |
+  AWS/GCP/Azure keys in ENV are stored in the image and trivially extracted from
+  a pulled image.
+remediation: |
+  Use the cloud provider's workload identity / instance credentials at runtime;
+  never bake keys into images.
+query:
+  any:
+    - path: all.env[*]
+      matches: '((AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|"type"\s*:\s*"service_account"|AccountKey=[A-Za-z0-9+/=]{40,})'
+    - path: all.env[*]
+      where:
+        all:
+          - path: "@"
+            matches: '(?i)aws_secret_access_key=[A-Za-z0-9/+=]{40}'
+          - not:
+              path: "@"
+              matches: '(?i)aws_secret_access_key=\$'
+    - path: all.env[*]
+      where:
+        all:
+          - path: "@"
+            matches: '(?i)azure_client_secret=.+'
+          - not:
+              path: "@"
+              matches: '(?i)azure_client_secret=\$'
+---
+id: DOCK_ENV_005
+title: Excessive environment variables
+severity: WARNING
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: The final image sets 30 or more environment variables
+description: |
+  A large number of baked-in environment variables is hard to audit and often a
+  sign configuration belongs outside the image.
+remediation: |
+  Move configuration to runtime and keep only what the image truly needs.
+query:
+  path: final.env
+  length_gte: 30
+---
+id: DOCK_COPY_001
+title: Secret file copied into image
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: "A secret or keystore file is copied into the image ({{ .Value }})"
+description: |
+  Secret bundles, keystores and service-account files committed to a layer are
+  recoverable from the image even if a later layer deletes them.
+remediation: |
+  Do not COPY secrets. Mount them with `RUN --mount=type=secret` or inject at
+  runtime.
+query:
+  path: all.copy[*].src[*]
+  matches: '(?i)(^|/)(secrets?(\.[a-z]+)?|credentials?(\.[a-z]+)?|\.htpasswd|service[-_]account[^/]*\.json|[^/]*\.(kdbx|keystore|jks|p12|pfx|ovpn))$'
+---
+id: DOCK_COPY_002
+title: Private key copied into image
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: "A private key is copied into the image ({{ .Value }})"
+description: |
+  A private key committed to an image layer is readable by anyone who can pull
+  the image, even if a later layer deletes it.
+remediation: |
+  Never COPY keys into an image. Mount them at build time with
+  `RUN --mount=type=secret`, or provide them at runtime.
+query:
+  path: all.copy[*].src[*]
+  matches: '(?i)(^|/)(id_(rsa|dsa|ecdsa|ed25519)|[^/]*\.(pem|key|ppk|asc|gpg))$'
+---
+id: DOCK_COPY_003
+title: .env file copied into image
+severity: ERROR
+category: security
+target: dockerfile
+resource: dockerfile
+message: "A .env file is copied into the image ({{ .Value }})"
+description: |
+  .env files hold configuration and often secrets. Copying them into an image
+  leaks those values to anyone who can pull it.
+remediation: |
+  Exclude .env files via .dockerignore; provide configuration at runtime. Example
+  templates (.env.example) are fine.
+query:
+  path: all.copy[*].src[*]
+  where:
+    all:
+      - path: "@"
+        matches: '(^|/)\.env(\.[A-Za-z0-9_-]+)?$'
+      - not:
+          path: "@"
+          matches: '(^|/)\.env\.(example|sample|template|dist)$'
+---
+id: DOCK_COPY_004
+title: Git metadata copied into image
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: The image may include the .git directory
+description: |
+  A copied .git directory exposes full history — including secrets removed in
+  later commits — and bloats the image.
+remediation: |
+  Exclude `.git` in .dockerignore and copy explicit paths.
+query:
+  any:
+    - path: all.copy[*].src[*]
+      matches: '(^|/)\.git(/|$)'
+    - all:
+        - path: final.copy[*].src
+          contains_any: [".", "./"]
+        - not:
+            path: context.dockerignore[*]
+            matches: '^(\*\*/)?/?\.git/?(\*\*?)?$'
+---
+id: DOCK_COPY_005
+title: node_modules copied from the host
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: Host node_modules may be copied into the image
+description: |
+  Copying host node_modules ships platform-specific binaries and stale
+  dependencies. Dependencies should be installed inside the build.
+remediation: |
+  Exclude `node_modules` in .dockerignore and install dependencies in the build.
+query:
+  any:
+    - path: all.copy[*].src[*]
+      matches: '(^|/)node_modules(/|$)'
+    - all:
+        - path: all.copy[*].src
+          contains_any: [".", "./"]
+        - path: all.run[*]
+          matches: '\b(npm|yarn|pnpm)\b'
+        - not:
+            path: context.dockerignore[*]
+            matches: '^(\*\*/)?/?node_modules/?(\*\*?)?$'
+---
+id: DOCK_COPY_006
+title: Build artifacts copied into image
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: "Local build artifacts or caches are copied into the final image ({{ .Value }})"
+description: |
+  Coverage reports, caches and source maps add size and can leak source
+  structure; they are not needed at runtime.
+remediation: |
+  Exclude these paths in .dockerignore and copy only runtime artifacts.
+query:
+  path: final.copy[*].src[*]
+  matches: '(^|/)(coverage|\.nyc_output|__pycache__|\.pytest_cache|\.mypy_cache|\.ruff_cache|\.tox|\.gradle|\.idea|\.vscode|[^/]*\.log|[^/]*\.map)(/|$)'
+---
+id: DOCK_COPY_007
+title: Test files copied into production image
+severity: WARNING
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: "Test files are copied into the final image ({{ .Value }})"
+description: |
+  Tests and fixtures add size and attack surface and do not belong in a
+  production runtime image.
+remediation: |
+  Exclude test paths in .dockerignore and copy only what the runtime needs.
+query:
+  path: final.copy[*].src[*]
+  matches: '((^|/)(tests?|__tests__|spec|specs|e2e|cypress|fixtures|testdata)(/|$)|\.(test|spec)\.[cm]?[jt]sx?$|_test\.go$|(^|/)test_[^/]*\.py$|_spec\.rb$)'
+---
+id: DOCK_PKG_001
+title: Package installed without a pinned version
+severity: WARNING
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: A package is installed without a pinned version
+description: |
+  Installing a package with no version pin means the installed version changes
+  as upstream repositories update, making builds non-reproducible.
+remediation: |
+  Pin versions, e.g. `apt-get install -y curl=7.88.1-10`, `apk add curl=8.5.0`,
+  or `pip install requests==2.31.0`.
+query:
+  path: all.packages[*]
+  where:
+    path: version
+    not_exists: true
+---
+id: DOCK_PKG_002
+title: Unverified package repository or download
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: A RUN disables package or TLS verification
+description: |
+  Disabling GPG/TLS verification (apt-key add, --allow-unauthenticated,
+  --nogpgcheck, curl -k, …) opens the build to tampered packages.
+remediation: |
+  Keep signature and certificate verification enabled.
+query:
+  path: all.run[*]
+  matches: '(apt-key\s+add|\[trusted=yes\]|--allow-unauthenticated|--allow-insecure-repositories|--nogpgcheck|gpgcheck=0|--no-check-certificate|\bcurl\b[^&;|]*\s(-k|--insecure)\b|\bpip3?\b[^&;|]*--trusted-host|\bapk\b[^&;|]*--allow-untrusted|strict-ssl\s+false|GIT_SSL_NO_VERIFY)'
+---
+id: DOCK_PKG_003
+title: Remote script piped into a shell
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: A RUN pipes a download straight into a shell
+description: |
+  `curl ... | sh` runs whatever the server returns at build time, with no
+  integrity check — a supply-chain risk.
+remediation: |
+  Download the script, verify its checksum or signature, then execute it.
+query:
+  path: all.run[*]
+  matches: '\b(curl|wget)\b[^;&]*\|\s*(sudo\s+)?(-E\s+)?((ba|z|da)?sh|python3?|perl)\b'
+---
+id: DOCK_PKG_004
+title: Remote artifact used without verification
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: A downloaded artifact is executed without checksum or signature verification
+description: |
+  Downloading and running an artifact without verifying it lets a compromised or
+  MITM'd source inject code into the build.
+remediation: |
+  Verify a checksum or signature (sha256sum, gpg --verify, cosign verify) before
+  executing, or use `ADD --checksum=`.
+query:
+  any:
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\b(curl|wget)\b[^&;|]*\s(-o|-O|--output)\s*\S+'
+          - path: "@"
+            matches: '(\b(ba|z|da)?sh\s+\S+|chmod\s+\+x|\./\S+)'
+          - not:
+              path: "@"
+              matches: '(sha256sum|sha512sum|shasum|gpg\s+--verify|gpgv|cosign\s+verify|minisign)'
+    - path: all.run[*]
+      matches: '<\(\s*(curl|wget)\b'
+    - path: all.copy[*]
+      where:
+        all:
+          - path: remote
+            equals: true
+          - path: checksum
+            not_exists: true
+---
+id: DOCK_PKG_005
+title: apt cache not cleaned after install
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: An apt install does not clean /var/lib/apt/lists in the same layer
+description: |
+  Leaving the apt lists in the layer adds tens of megabytes for no runtime
+  benefit.
+remediation: |
+  End the RUN with `rm -rf /var/lib/apt/lists/*`, or use `--mount=type=cache`.
+query:
+  path: all.run[*]
+  where:
+    all:
+      - path: "@"
+        matches: '\bapt(-get)?\s[^&;|]*\binstall\b'
+      - not:
+          path: "@"
+          matches: '(rm\s+-[a-zA-Z]*r[a-zA-Z]*\s+/var/lib/apt/lists|--mount=type=cache[^ ]*target=/var/lib/apt)'
+---
+id: DOCK_PKG_006
+title: Recommended packages installed
+severity: WARNING
+category: performance
+target: dockerfile
+resource: dockerfile
+message: A package install pulls in recommended/weak dependencies
+description: |
+  Recommended/weak dependencies bloat the image and widen the attack surface for
+  packages the app never uses.
+remediation: |
+  Use `--no-install-recommends` (apt), `install_weak_deps=False` (dnf) or
+  `--no-recommends` (zypper).
+query:
+  any:
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\bapt(-get)?\s[^&;|]*\binstall\b'
+          - not:
+              path: "@"
+              matches: '--no-install-recommends'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\b(yum|dnf|microdnf)\s[^&;|]*\binstall\b'
+          - not:
+              path: "@"
+              matches: '(install_weak_deps=(0|False|false)|--nodocs)'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\bzypper\s[^&;|]*\b(in|install)\b'
+          - not:
+              path: "@"
+              matches: '--no-recommends'
+---
+id: DOCK_PKG_007
+title: Package installation not reproducible
+severity: WARNING
+category: maintainability
+target: dockerfile
+resource: dockerfile
+message: A package step is not reproducible (blanket upgrade or no lockfile)
+description: |
+  Blanket upgrades and lockfile-less installs (npm install, yarn without
+  --frozen-lockfile, go get) change what is installed on every build.
+remediation: |
+  Use lockfile-respecting installs (`npm ci`, `yarn --frozen-lockfile`,
+  `pipenv install --deploy`) and pin versions instead of blanket upgrades.
+query:
+  any:
+    - path: all.run[*]
+      matches: '\b(apt(-get)?\s+(-\S+\s+)*(upgrade|dist-upgrade|full-upgrade)|apk\s+(-\S+\s+)*upgrade|(yum|dnf|microdnf)\s+(-\S+\s+)*(update|upgrade)|zypper\s+(-\S+\s+)*(up|update|dup))\b'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\bnpm\s+install\b'
+          - not:
+              path: "@"
+              matches: '\bnpm\s+install\s+(-g|--global)'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\byarn(\s+install)?(\s|$)'
+          - not:
+              path: "@"
+              matches: '--(frozen-lockfile|immutable)'
+    - path: all.run[*]
+      where:
+        all:
+          - path: "@"
+            matches: '\bpipenv\s+install\b'
+          - not:
+              path: "@"
+              matches: '--deploy'
+    - path: all.run[*]
+      matches: '\bgo\s+get\b'
+---
+id: DOCK_NET_001
+title: Many exposed ports
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+message: The final image exposes three or more ports
+description: |
+  A container should usually serve one thing. Many exposed ports suggests several
+  services in one image and a larger attack surface.
+remediation: |
+  Split responsibilities into separate images, exposing only the ports each
+  needs.
+query:
+  path: final.expose
+  length_gte: 3
+---
+id: DOCK_NET_002
+title: No EXPOSE instruction
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: The final image documents no exposed port
+description: |
+  EXPOSE documents the port the service listens on. Its absence makes the image
+  harder to run and orchestrate correctly.
+remediation: |
+  Add `EXPOSE <port>` for the port your service listens on.
+query:
+  path: final.expose
+  not_exists: true
+---
+id: DOCK_NET_003
+title: Unnecessary network service
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: A legacy or unnecessary network service is present
+description: |
+  Services such as telnet, FTP, SNMP or NFS have weak security defaults and are
+  rarely needed in a container.
+remediation: |
+  Remove the service package and do not expose its port.
+query:
+  any:
+    - path: final.packages[*].name
+      in: [telnetd, inetutils-telnetd, xinetd, vsftpd, proftpd, pure-ftpd, tftpd-hpa, tftp-server, rsh-server, snmpd, samba, nfs-kernel-server, rpcbind, netcat, netcat-openbsd, netcat-traditional, ncat, nmap, socat]
+    - path: final.expose[*]
+      matches: '^(21|23|69|111|135|139|161|445|512|513|514|2049)/'
+---
+id: DOCK_NET_004
+title: Debug port or debugger exposed
+severity: WARNING
+category: security
+target: dockerfile
+resource: dockerfile
+message: The image exposes a debugger port or starts a debugger
+description: |
+  A remote debugger (JDWP, Node inspector, Delve, debugpy, pprof, JMX) in a
+  running image is a direct path to code execution.
+remediation: |
+  Remove debug ports and debugger flags from production images.
+query:
+  any:
+    - path: final.expose[*]
+      matches: '^(5005|8000|9229|9230|2345|5678|6060|1099)/'
+    - path: final.cmd.value
+      matches: '(--inspect(-brk)?(=|\s|$)|agentlib:jdwp|-m\s+debugpy|\bdlv\s)'
+    - path: final.entrypoint.value
+      matches: '(--inspect(-brk)?(=|\s|$)|agentlib:jdwp|-m\s+debugpy|\bdlv\s)'
+    - path: final.env[*]
+      matches: '(?i)^(java_tool_options|jdk_java_options|node_options)=.*(agentlib:jdwp|--inspect)'
+---
+id: DOCK_PROD_001
+title: Logging strategy not declared
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+enabled: false
+message: The image neither logs to stdout/stderr nor declares a logging label
+description: |
+  Containers should log to stdout/stderr so the platform can collect logs.
+remediation: |
+  Log to stdout/stderr (e.g. symlink log files to /dev/stdout), or set the
+  `com.example.logging` label (adjust to your convention).
+query:
+  all:
+    - path: final.labels["com.example.logging"]
+      not_exists: true
+    - not:
+        path: final.run[*]
+        matches: 'ln\s+-sf?\s+/dev/(stdout|stderr)'
+---
+id: DOCK_PROD_002
+title: Health endpoint not declared
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+enabled: false
+message: The image declares no health endpoint
+description: |
+  A documented health endpoint lets platforms probe the service.
+remediation: |
+  Point HEALTHCHECK at a health path, or set the `com.example.health.path` label.
+query:
+  all:
+    - path: final.labels["com.example.health.path"]
+      not_exists: true
+    - not:
+        path: final.healthcheck.value
+        matches: '(https?://|/health|/healthz|/ready|/readyz|/live|/livez|/status|/ping)'
+---
+id: DOCK_PROD_003
+title: Metrics endpoint not configured
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+enabled: false
+message: The image declares no metrics endpoint
+description: |
+  A declared metrics endpoint lets monitoring scrape the service.
+remediation: |
+  Set `prometheus.io/scrape` or the `com.example.metrics.port` label.
+query:
+  all:
+    - path: final.labels["prometheus.io/scrape"]
+      not_exists: true
+    - path: final.labels["com.example.metrics.port"]
+      not_exists: true
+---
+id: DOCK_PROD_004
+title: Backup tooling without a backup process
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+enabled: false
+message: The image ships backup/DB tooling but declares no backup schedule
+description: |
+  Backup or database-dump tools in an image without a declared process suggests
+  ad-hoc, unmanaged backups.
+remediation: |
+  Declare the backup schedule with `com.example.backup.schedule`, or remove the
+  tooling if it is unused.
+when:
+  any:
+    - path: final.packages[*].name
+      in: [postgresql-client, mysql-client, default-mysql-client, mariadb-client, mongodb-database-tools, restic, borgbackup, rclone, duplicity]
+    - path: final.run[*]
+      matches: '\b(pg_dump|pg_dumpall|mysqldump|mongodump)\b'
+query:
+  path: final.labels["com.example.backup.schedule"]
+  not_exists: true
+---
+id: DOCK_PROD_005
+title: Container image metadata labels missing
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+message: The image is missing OCI title/description/version labels
+description: |
+  Standard OCI labels make images discoverable and auditable in registries and
+  scanners.
+remediation: |
+  Add `org.opencontainers.image.title`, `.description` and `.version` labels.
+query:
+  any:
+    - path: final.labels["org.opencontainers.image.title"]
+      not_exists: true
+    - path: final.labels["org.opencontainers.image.description"]
+      not_exists: true
+    - path: final.labels["org.opencontainers.image.version"]
+      not_exists: true
+---
+id: DOCK_PROD_006
+title: Maintainer metadata missing
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+message: The image declares no authors/maintainer
+description: |
+  Recording who maintains an image speeds up triage and security response.
+remediation: |
+  Add `org.opencontainers.image.authors` (or a `maintainer` label).
+query:
+  all:
+    - path: final.labels["org.opencontainers.image.authors"]
+      not_exists: true
+    - path: final.labels["maintainer"]
+      not_exists: true
+---
+id: DOCK_PROD_007
+title: HEALTHCHECK is incompletely configured
+severity: WARNING
+category: reliability
+target: dockerfile
+resource: dockerfile
+message: HEALTHCHECK does not set interval, timeout, start-period and retries
+description: |
+  Without explicit timing, a HEALTHCHECK uses defaults that are often wrong for
+  the service, causing flapping or slow failure detection.
+remediation: |
+  Set `--interval`, `--timeout`, `--start-period` and `--retries` on HEALTHCHECK.
+when:
+  path: final.healthcheck.value
+  not_equals: NONE
+query:
+  any:
+    - path: final.healthcheck.interval
+      not_exists: true
+    - path: final.healthcheck.timeout
+      not_exists: true
+    - path: final.healthcheck.start_period
+      not_exists: true
+    - path: final.healthcheck.retries
+      not_exists: true
+---
+id: DOCK_PROD_008
+title: Runtime resource expectations undocumented
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+enabled: false
+message: The image does not document its expected CPU/memory via labels
+description: |
+  Recording expected CPU and memory as image labels lets platforms schedule and
+  size the container without out-of-band knowledge.
+remediation: |
+  Add `com.example.resources.memory` and `com.example.resources.cpu` labels
+  (adjust the label keys to your convention).
+query:
+  all:
+    - path: final.labels["com.example.resources.memory"]
+      not_exists: true
+    - path: final.labels["com.example.resources.cpu"]
+      not_exists: true
+---
+id: DOCK_PROD_009
+title: Image ownership metadata missing
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+enabled: false
+message: The image declares no vendor/owner/team
+description: |
+  Ownership metadata makes it clear who is responsible for an image in a large
+  registry.
+remediation: |
+  Add `org.opencontainers.image.vendor`, or `com.example.owner`/`com.example.team`
+  labels.
+query:
+  all:
+    - path: final.labels["org.opencontainers.image.vendor"]
+      not_exists: true
+    - path: final.labels["com.example.owner"]
+      not_exists: true
+    - path: final.labels["com.example.team"]
+      not_exists: true
+---
+id: DOCK_PROD_010
+title: Supply-chain traceability metadata missing
+severity: WARNING
+category: operational
+target: dockerfile
+resource: dockerfile
+message: The image is missing source/revision/base-image OCI labels
+description: |
+  Source, revision and base-image labels tie an image back to the commit and base
+  it was built from — essential for incident response and SBOMs.
+remediation: |
+  Add `org.opencontainers.image.source`, `.revision` and `.base.name` labels.
+query:
+  any:
+    - path: final.labels["org.opencontainers.image.source"]
+      not_exists: true
+    - path: final.labels["org.opencontainers.image.revision"]
+      not_exists: true
+    - path: final.labels["org.opencontainers.image.base.name"]
+      not_exists: true
