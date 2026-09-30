@@ -1,0 +1,844 @@
+# nginx rules for StackGuard.
+id: NGX_SEC_001
+title: Server has no TLS
+severity: ERROR
+category: security
+target: nginx
+resource: nginx
+message: A server serves plaintext HTTP with no TLS
+description: |
+  A server block that is not TLS, not a pure HTTP→HTTPS redirect and not
+  internal-only serves application traffic in cleartext.
+remediation: |
+  Add `listen 443 ssl;` (and HTTP/2 or HTTP/3), or make the server a redirect to
+  the HTTPS vhost.
+query:
+  path: servers[*]
+  where:
+    all:
+      - path: tls
+        equals: false
+      - path: redirect_only
+        equals: false
+      - path: internal_only
+        equals: false
+---
+id: NGX_SEC_002
+title: Weak TLS protocol versions enabled
+severity: WARNING
+category: security
+target: nginx
+resource: nginx
+message: A TLS server enables deprecated TLS protocol versions
+description: |
+  SSLv2, SSLv3, TLS 1.0 and TLS 1.1 have known weaknesses (RFC 8996). Before
+  nginx 1.23.4 the default still included TLS 1.0/1.1, so an unset ssl_protocols
+  is also flagged.
+remediation: |
+  Set `ssl_protocols TLSv1.2 TLSv1.3;`.
+query:
+  path: servers[*]
+  where:
+    all:
+      - path: tls
+        equals: true
+      - any:
+          - path: effective.ssl_protocols
+            matches: '(SSLv2|SSLv3|TLSv1(\s|$)|TLSv1\.1)'
+          - path: effective.ssl_protocols
+            not_exists: true
+---
+id: NGX_SEC_003
+title: Weak SSL ciphers configured
+severity: WARNING
+category: security
+target: nginx
+resource: nginx
+message: A TLS server enables weak SSL ciphers
+description: |
+  Weak algorithms (RC4, 3DES, MD5, NULL, EXPORT, …), broad groups (ALL, LOW, …)
+  and CBC suites with a SHA-1 MAC are vulnerable and should not be offered.
+remediation: |
+  Use a modern cipher list (Mozilla "intermediate"), e.g.
+  `ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:...;`.
+query:
+  path: servers[*]
+  where:
+    all:
+      - path: tls
+        equals: true
+      - any:
+          - path: effective.ssl_ciphers
+            matches: '(^|:)[A-Za-z0-9+-]*(RC4|DES|3DES|MD5|NULL|EXPORT|EXP-|aNULL|eNULL|ADH|AECDH|PSK|SRP|SEED|IDEA|CAMELLIA)'
+          - path: effective.ssl_ciphers
+            matches: '(^|:)(ALL|DEFAULT|LOW|MEDIUM|COMPLEMENTOFALL)(:|$)'
+          - path: effective.ssl_ciphers
+            matches: '(^|:)[A-Z0-9-]*-SHA(:|$)'
+---
+id: NGX_SEC_004
+title: HSTS header missing or too short
+severity: WARNING
+category: security
+target: nginx
+resource: nginx
+message: A TLS context does not send a year-long HSTS header
+description: |
+  Without Strict-Transport-Security (max-age ≥ 1 year), a network attacker can
+  downgrade the first request to plaintext before the redirect.
+remediation: |
+  Add `add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;`.
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: tls
+        equals: true
+      - path: redirect_only
+        equals: false
+      - any:
+          - not:
+              path: effective.headers[*]
+              matches: '(?i)^strict-transport-security\s'
+          - path: effective.headers[*]
+            matches: '(?i)^strict-transport-security\s.*max-age=([0-9]{1,7}|[0-2][0-9]{7}|30[0-9]{6}|31[0-4][0-9]{5}|315[0-2][0-9]{4}|3153[0-5][0-9]{3})\b'
+---
+id: NGX_SEC_005
+title: X-Frame-Options header missing
+severity: WARNING
+category: security
+target: nginx
+resource: nginx
+message: A response context sets no X-Frame-Options or CSP frame-ancestors
+description: |
+  Without X-Frame-Options (or CSP frame-ancestors), the site can be framed by
+  other origins, enabling clickjacking.
+remediation: |
+  Add `add_header X-Frame-Options "SAMEORIGIN" always;`, or a CSP with
+  `frame-ancestors`.
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: redirect_only
+        equals: false
+      - not:
+          path: effective.headers[*]
+          matches: '(?i)^x-frame-options\s'
+      - not:
+          path: effective.headers[*]
+          matches: '(?i)^content-security-policy\s.*frame-ancestors'
+---
+id: NGX_SEC_006
+title: X-Content-Type-Options header missing
+severity: WARNING
+category: security
+target: nginx
+resource: nginx
+message: A response context does not send X-Content-Type-Options nosniff
+description: |
+  Without `X-Content-Type-Options: nosniff`, browsers may MIME-sniff responses,
+  enabling some content-injection attacks.
+remediation: |
+  Add `add_header X-Content-Type-Options "nosniff" always;`.
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: redirect_only
+        equals: false
+      - not:
+          path: effective.headers[*]
+          matches: '(?i)^x-content-type-options\s+nosniff'
+---
+id: NGX_SEC_007
+title: Content-Security-Policy header missing
+severity: WARNING
+category: security
+target: nginx
+resource: nginx
+message: A response context sends no Content-Security-Policy
+description: |
+  A CSP is the strongest defence against cross-site scripting and mixed content.
+remediation: |
+  Add a `Content-Security-Policy` header suited to the app, e.g.
+  `add_header Content-Security-Policy "default-src 'self'" always;`.
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: redirect_only
+        equals: false
+      - not:
+          path: effective.headers[*]
+          matches: '(?i)^content-security-policy\s'
+---
+id: NGX_SEC_008
+title: Referrer-Policy header missing
+severity: WARNING
+category: security
+target: nginx
+resource: nginx
+message: A response context sends no Referrer-Policy
+description: |
+  Without a Referrer-Policy, full URLs (which may contain tokens) can leak to
+  third parties via the Referer header.
+remediation: |
+  Add `add_header Referrer-Policy "no-referrer" always;` (or "strict-origin...").
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: redirect_only
+        equals: false
+      - not:
+          path: effective.headers[*]
+          matches: '(?i)^referrer-policy\s'
+---
+id: NGX_SEC_009
+title: Server version disclosed
+severity: WARNING
+category: security
+target: nginx
+resource: nginx
+message: server_tokens is not off, so nginx advertises its version
+description: |
+  With server_tokens on (the default), nginx advertises its exact version in the
+  Server header and error pages, helping attackers target known CVEs.
+remediation: |
+  Add `server_tokens off;` in the http block.
+query:
+  path: servers[*]
+  where:
+    any:
+      - path: effective.server_tokens
+        not_exists: true
+      - path: effective.server_tokens
+        not_equals: "off"
+---
+id: NGX_SEC_010
+title: Directory listing enabled
+severity: ERROR
+category: security
+target: nginx
+resource: nginx
+message: A location enables directory listing (autoindex)
+description: |
+  autoindex exposes every file in a directory — often including backups and
+  configuration — to anyone who can reach it.
+remediation: |
+  Remove `autoindex on;` (and any fancyindex).
+query:
+  any:
+    - path: leaves[*].effective.autoindex
+      equals: "on"
+    - path: leaves[*].effective.fancyindex
+      equals: "on"
+---
+id: NGX_PROXY_001
+title: Proxy timeouts not configured
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: A proxied location sets no proxy timeouts
+description: |
+  Without explicit proxy timeouts, a slow or hung upstream ties up nginx worker
+  connections using defaults that are often wrong for the service.
+remediation: |
+  Set `proxy_connect_timeout`, `proxy_read_timeout` and `proxy_send_timeout`.
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: effective.proxy_pass
+        exists: true
+      - any:
+          - path: effective.proxy_connect_timeout
+            not_exists: true
+          - path: effective.proxy_read_timeout
+            not_exists: true
+          - path: effective.proxy_send_timeout
+            not_exists: true
+---
+id: NGX_PROXY_002
+title: Client body size limit not configured
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: A context sets no client_max_body_size (or disables it with 0)
+description: |
+  With no limit (or 0, which disables it), a client can stream an arbitrarily
+  large body and exhaust memory or disk.
+remediation: |
+  Set a sensible `client_max_body_size`, e.g. `client_max_body_size 10m;`.
+query:
+  path: leaves[*]
+  where:
+    any:
+      - path: effective.client_max_body_size
+        not_exists: true
+      - path: effective.client_max_body_size
+        matches: '^0[kKmMgG]?$'
+---
+id: NGX_PROXY_003
+title: Upstream health checks missing
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: An upstream has neither active health checks nor passive max_fails
+description: |
+  Without health checks, nginx keeps sending traffic to a dead backend. Open
+  source nginx offers passive checks via max_fails on each server line.
+remediation: |
+  Add `max_fails=` (and `fail_timeout=`) to each upstream server, or use active
+  `health_check` (NGINX Plus).
+query:
+  path: upstreams[*]
+  where:
+    all:
+      - path: health_check
+        equals: false
+      - path: server[*]
+        not_matches: '\bmax_fails=[1-9]'
+---
+id: NGX_PROXY_004
+title: Proxy buffering configuration missing
+severity: WARNING
+category: performance
+target: nginx
+resource: nginx
+message: A proxied location tunes no proxy buffering
+description: |
+  Default proxy buffering is often wrong for the workload — too little buffering
+  streams slow clients straight to the upstream; too much buffers large
+  responses to disk.
+remediation: |
+  Set `proxy_buffering`, `proxy_buffers` and/or `proxy_buffer_size` for the
+  location's workload.
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: effective.proxy_pass
+        exists: true
+      - path: effective.proxy_buffering
+        not_exists: true
+      - path: effective.proxy_buffers
+        not_exists: true
+      - path: effective.proxy_buffer_size
+        not_exists: true
+---
+id: NGX_PROXY_005
+title: WebSocket proxy configuration incomplete
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: A WebSocket-style proxy is missing upgrade/version/timeout settings
+description: |
+  WebSocket proxying needs HTTP/1.1, the Upgrade and Connection headers, and a
+  long read timeout, or connections fail or drop.
+remediation: |
+  Set `proxy_http_version 1.1;`, `proxy_set_header Upgrade $http_upgrade;`,
+  `proxy_set_header Connection $connection_upgrade;` and a long
+  `proxy_read_timeout`.
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: effective.proxy_pass
+        exists: true
+      - any:
+          - path: effective.proxy_set_header[*]
+            matches: '(?i)^upgrade\s'
+          - path: path
+            matches: '(?i)(^|/)(ws|wss|websocket|websockets|socket\.io|sockjs|cable|hubs?)(/|$)'
+      - any:
+          - path: effective.proxy_http_version
+            not_equals: "1.1"
+          - path: effective.proxy_http_version
+            not_exists: true
+          - not:
+              path: effective.proxy_set_header[*]
+              matches: '(?i)^upgrade\s+\$http_upgrade$'
+          - not:
+              path: effective.proxy_set_header[*]
+              matches: '(?i)^connection\s+(\$connection_upgrade|"?upgrade"?)$'
+          - path: effective.proxy_read_timeout
+            not_exists: true
+---
+id: NGX_LOG_001
+title: Access logging disabled
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+message: Access logging is turned off for a request-serving location
+description: |
+  With access_log off, requests to this location leave no trace, hindering
+  traffic analysis and incident response. Disabling it for static/probe noise is
+  acceptable.
+remediation: |
+  Enable access logging, or scope `access_log off;` to genuine noise (favicon,
+  health probes, static assets).
+query:
+  path: leaves[*]
+  where:
+    all:
+      - path: effective.access_log[*]
+        equals: "off"
+      - any:
+          - path: path
+            not_exists: true
+          - path: path
+            not_matches: '(?i)(favicon|robots\.txt|health|healthz|ready|live|status|ping|metrics|\.well-known|\.(css|js|png|jpe?g|gif|svg|ico|woff2?)\b)'
+---
+id: NGX_LOG_002
+title: Error logging not configured
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+message: Error logging is unset or sent to /dev/null
+description: |
+  Without error logging, failures leave no trace, making incidents far harder to
+  diagnose.
+remediation: |
+  Configure `error_log` to a file or your log collector at an appropriate level.
+query:
+  any:
+    - path: main.error_log
+      not_exists: true
+    - path: main.error_log[*]
+      matches: '^/dev/null'
+---
+id: NGX_LOG_003
+title: Log rotation not configured
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+# Depends on host/repo layout (logrotate config); off by default.
+enabled: false
+message: Logs are written to files but no logrotate config was found
+description: |
+  Log files that are never rotated grow until they fill the disk.
+remediation: |
+  Add a logrotate rule for nginx's logs, or log to stdout/stderr/syslog and let
+  the platform handle rotation.
+query:
+  all:
+    - path: log_targets[*]
+      where:
+        all:
+          - path: "@"
+            matches: '^/'
+          - not:
+              path: "@"
+              matches: '^/(dev/(stdout|stderr)|proc/self/fd/)'
+    - path: context.logrotate
+      not_exists: true
+---
+id: NGX_LOG_004
+title: Audit logging not configured
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+message: The log format captures no request id or timing
+description: |
+  The default "combined" format has no request id, response timing or upstream
+  data, so logs cannot be correlated across services or used for latency
+  analysis.
+remediation: |
+  Define a `log_format` that includes `$request_id` and `$request_time`
+  (and `$upstream_response_time`).
+query:
+  any:
+    - path: http.log_format
+      not_exists: true
+    - not:
+        path: http.log_format[*]
+        matches: '\$request_id'
+    - not:
+        path: http.log_format[*]
+        matches: '\$(request_time|upstream_response_time)'
+---
+id: NGX_PERF_001
+title: Keepalive configuration missing
+severity: WARNING
+category: performance
+target: nginx
+resource: nginx
+message: Keepalive is not tuned for clients or upstreams
+description: |
+  Without keepalive_timeout, upstream `keepalive`, and HTTP/1.1 with an empty
+  Connection header on upstream proxies, nginx reopens connections needlessly.
+remediation: |
+  Set `keepalive_timeout`, add `keepalive` to upstreams, and on upstream proxies
+  set `proxy_http_version 1.1;` with `proxy_set_header Connection "";`.
+query:
+  any:
+    - path: http.keepalive_timeout
+      not_exists: true
+    - path: upstreams[*]
+      where:
+        path: keepalive
+        not_exists: true
+    - path: leaves[*]
+      where:
+        all:
+          - path: proxy_target_is_upstream
+            equals: true
+          - any:
+              - path: effective.proxy_http_version
+                not_exists: true
+              - not:
+                  path: effective.proxy_set_header[*]
+                  matches: '(?i)^connection\s+("")?$'
+---
+id: NGX_PERF_002
+title: Compression not configured
+severity: WARNING
+category: performance
+target: nginx
+resource: nginx
+message: A server enables no response compression
+description: |
+  Without gzip/brotli, text responses are sent uncompressed, wasting bandwidth
+  and slowing page loads.
+remediation: |
+  Enable `gzip on;` (and/or brotli) with sensible `gzip_types`.
+query:
+  path: servers[*]
+  where:
+    all:
+      - path: redirect_only
+        equals: false
+      - not:
+          path: effective.gzip
+          equals: "on"
+      - not:
+          path: effective.brotli
+          equals: "on"
+      - not:
+          path: effective.gzip_static
+          equals: "on"
+---
+id: NGX_PERF_003
+title: Static asset caching not configured
+severity: WARNING
+category: performance
+target: nginx
+resource: nginx
+message: A static-asset location sets no cache lifetime
+description: |
+  Static assets served without expires/Cache-Control are re-fetched on every
+  visit, wasting bandwidth and hurting performance.
+remediation: |
+  Add `expires` (or a `Cache-Control` header) for static locations, e.g.
+  `expires 30d;`.
+query:
+  path: leaves[*]
+  where:
+    all:
+      - any:
+          - path: path
+            matches: '(?i)\.(css|js|mjs|png|jpe?g|gif|svg|ico|webp|avif|woff2?|ttf|eot|otf|map)\b'
+          - path: path
+            matches: '(?i)^/(static|assets|media|public|dist|build|images|img|fonts)(/|$)'
+      - path: effective.expires
+        not_exists: true
+      - not:
+          path: effective.headers[*]
+          matches: '(?i)^cache-control\s'
+---
+id: NGX_PERF_004
+title: Worker process tuning missing
+severity: WARNING
+category: performance
+target: nginx
+resource: nginx
+message: Worker processes/connections/file-descriptors are not tuned
+description: |
+  Defaults (1 worker) leave most of the machine idle and can exhaust file
+  descriptors under load.
+remediation: |
+  Set `worker_processes auto;`, `worker_connections`, and `worker_rlimit_nofile`
+  to cover the connection count.
+query:
+  any:
+    - path: main.worker_processes
+      not_exists: true
+    - path: events.worker_connections
+      not_exists: true
+    - path: main.worker_rlimit_nofile
+      not_exists: true
+---
+id: NGX_PERF_005
+title: Rate limiting not configured
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: No request/connection rate limiting is configured
+description: |
+  Without rate limiting, a single client can overwhelm the service or a backend
+  with requests or connections.
+remediation: |
+  Define `limit_req_zone`/`limit_conn_zone` and apply `limit_req`/`limit_conn`
+  to proxied locations.
+query:
+  any:
+    - all:
+        - path: http.limit_req_zone
+          not_exists: true
+        - path: http.limit_conn_zone
+          not_exists: true
+    - path: leaves[*]
+      where:
+        all:
+          - path: proxied
+            equals: true
+          - path: effective.limit_req
+            not_exists: true
+          - path: effective.limit_conn
+            not_exists: true
+---
+id: NGX_REL_001
+title: Upstream failover not configured
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: A proxy path has no failover (single server, direct host, or retries off)
+description: |
+  A single-server upstream with no backup, a direct proxy_pass to a host, or
+  proxy_next_upstream off all mean a single backend failure takes the service
+  down.
+remediation: |
+  Give upstreams two or more servers (or a `backup`), proxy via a named upstream,
+  and leave `proxy_next_upstream` enabled.
+query:
+  any:
+    - path: upstreams[*]
+      where:
+        all:
+          - not:
+              path: server
+              length_gte: 2
+          - not:
+              path: server[*]
+              matches: '\bbackup\b'
+    - path: leaves[*]
+      where:
+        all:
+          - path: proxied
+            equals: true
+          - path: proxy_target_is_upstream
+            equals: false
+    - path: leaves[*].effective.proxy_next_upstream
+      equals: "off"
+---
+id: NGX_REL_002
+title: Health endpoint not configured
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: A public server exposes no health/status location
+description: |
+  Without a health/readiness endpoint, load balancers and orchestrators cannot
+  tell whether the server is able to serve traffic.
+remediation: |
+  Add a location such as `/healthz` (adjust the path to your convention).
+query:
+  path: servers[*]
+  where:
+    all:
+      - path: redirect_only
+        equals: false
+      - path: internal_only
+        equals: false
+      - not:
+          path: locations[*].path
+          matches: '(?i)(health|healthz|ready|readyz|live|livez|status|ping)'
+---
+id: NGX_REL_003
+title: Load balancing strategy missing
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: A multi-server upstream declares no load-balancing method
+description: |
+  With two or more servers and no method, nginx uses round-robin, which ignores
+  server load and connection affinity.
+remediation: |
+  Choose a method: `least_conn;`, `ip_hash;`, `hash ...;`, `random;` or
+  `least_time ...;`.
+query:
+  path: upstreams[*]
+  where:
+    all:
+      - path: server
+        length_gte: 2
+      - path: least_conn
+        not_exists: true
+      - path: ip_hash
+        not_exists: true
+      - path: hash
+        not_exists: true
+      - path: random
+        not_exists: true
+      - path: least_time
+        not_exists: true
+---
+id: NGX_REL_004
+title: Graceful reload strategy not configured
+severity: WARNING
+category: reliability
+target: nginx
+resource: nginx
+message: worker_shutdown_timeout is not set
+description: |
+  Without worker_shutdown_timeout, after `nginx -s reload` old workers can linger
+  for hours on long-lived connections, pinning old config and code.
+remediation: |
+  Set `worker_shutdown_timeout` (e.g. `30s`) in the main context.
+query:
+  path: main.worker_shutdown_timeout
+  not_exists: true
+---
+id: NGX_PROD_001
+title: Monitoring endpoint not configured
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+message: No nginx metrics/status endpoint is exposed
+description: |
+  Without stub_status (or VTS / the NGINX Plus API), there is no way to scrape
+  connection and request metrics from nginx.
+remediation: |
+  Add a restricted `location` with `stub_status;` (allow only monitoring).
+query:
+  all:
+    - not:
+        path: leaves[*].effective.stub_status
+        exists: true
+    - not:
+        path: leaves[*].effective.vhost_traffic_status_display
+        exists: true
+    - not:
+        path: leaves[*].effective.api
+        exists: true
+---
+id: NGX_PROD_002
+title: Alerting integration not detected
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+# Depends on repo layout / annotations; off by default.
+enabled: false
+message: No alerting integration is declared or found in the repo
+description: |
+  Metrics without alerts mean nobody is told when nginx or a backend degrades.
+remediation: |
+  Declare alerting with a `# @alerting:` annotation, or keep alert rules in the
+  repo (alertmanager, *.rules.yaml).
+query:
+  all:
+    - path: meta.alerting
+      not_exists: true
+    - not:
+        path: context.files[*]
+        matches: '(?i)(alertmanager|alerts?\.ya?ml$|\.rules\.ya?ml$|prometheus.*rules)'
+---
+id: NGX_PROD_003
+title: Ownership metadata missing
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+# Depends on annotations; off by default.
+enabled: false
+message: The config declares no owner/team
+description: |
+  Ownership metadata makes it clear who is responsible for the config during an
+  incident.
+remediation: |
+  Add `# @owner: <team>` and/or `# @team: <team>` annotations.
+query:
+  all:
+    - path: meta.owner
+      not_exists: true
+    - path: meta.team
+      not_exists: true
+---
+id: NGX_PROD_004
+title: Backup strategy for configuration not detected
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+# Depends on host/repo state; off by default.
+enabled: false
+message: The config is not in version control and declares no backup
+description: |
+  Config that is neither in VCS nor backed up can be lost on host failure with no
+  way to restore it.
+remediation: |
+  Keep the config in version control, or declare a backup with `# @backup:`.
+query:
+  all:
+    - path: context.in_vcs
+      equals: false
+    - path: meta.backup
+      not_exists: true
+---
+id: NGX_PROD_005
+title: Production hardening incomplete
+severity: WARNING
+category: operational
+target: nginx
+resource: nginx
+message: A production-hardening measure is missing
+description: |
+  Checks a catch-all default_server, a restricted status endpoint, slow-client
+  (slowloris) timeouts, and the `always` flag on security headers so they are
+  also sent on error responses.
+remediation: |
+  Add a `default_server`, restrict stub_status with `allow`, set
+  client_header/body and send timeouts, and add `always` to security headers.
+query:
+  any:
+    - not:
+        path: servers[*].listen[*]
+        matches: '\bdefault_server\b'
+    - path: leaves[*]
+      where:
+        all:
+          - path: effective.stub_status
+            exists: true
+          - path: effective.allow
+            not_exists: true
+    - path: http.client_header_timeout
+      not_exists: true
+    - path: http.client_body_timeout
+      not_exists: true
+    - path: http.send_timeout
+      not_exists: true
+    - path: leaves[*]
+      where:
+        path: effective.headers[*]
+        where:
+          all:
+            - path: "@"
+              matches: '(?i)^(strict-transport-security|x-frame-options|x-content-type-options|content-security-policy|referrer-policy)\s'
+            - not:
+                path: "@"
+                matches: '\balways$'
