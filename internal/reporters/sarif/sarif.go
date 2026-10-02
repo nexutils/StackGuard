@@ -149,6 +149,9 @@ func (s *Reporter) Report(w io.Writer, r *models.Report) error {
 		if rr.Rule == nil {
 			continue
 		}
+		if s.opts.OmitSkipped && rr.Status == models.RuleSkipped {
+			continue
+		}
 		index[rr.RuleID] = len(drv.Rules)
 		drv.Rules = append(drv.Rules, toRule(rr.Rule))
 	}

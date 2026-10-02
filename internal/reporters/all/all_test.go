@@ -157,6 +157,42 @@ func TestJSONOmitSkipped(t *testing.T) {
 	}
 }
 
+func TestSARIFOmitSkipped(t *testing.T) {
+	var doc struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Rules []struct {
+						ID string `json:"id"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+			Results []struct {
+				RuleID    string `json:"ruleId"`
+				RuleIndex int    `json:"ruleIndex"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(render(t, "sarif", reporters.Options{OmitSkipped: true}, sampleReport()), &doc); err != nil {
+		t.Fatal(err)
+	}
+	run := doc.Runs[0]
+	for _, r := range run.Tool.Driver.Rules {
+		if r.ID == "TF_SEC_001" { // the sample's skipped rule
+			t.Error("OmitSkipped should drop skipped rule TF_SEC_001 from driver.rules")
+		}
+	}
+	// ruleIndex references must still resolve to the correct rule after trimming.
+	for _, res := range run.Results {
+		if res.RuleIndex < 0 || res.RuleIndex >= len(run.Tool.Driver.Rules) {
+			t.Fatalf("ruleIndex %d out of range (%d rules)", res.RuleIndex, len(run.Tool.Driver.Rules))
+		}
+		if got := run.Tool.Driver.Rules[res.RuleIndex].ID; got != res.RuleID {
+			t.Errorf("ruleIndex %d points at %s, want %s", res.RuleIndex, got, res.RuleID)
+		}
+	}
+}
+
 // TestSARIFShape checks the properties GitHub code scanning relies on.
 func TestSARIFShape(t *testing.T) {
 	var doc struct {

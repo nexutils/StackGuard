@@ -77,7 +77,7 @@ func newScanCommand(a *app) *cobra.Command {
 	cmd.Flags().StringVarP(&output, "output", "o", "", "write the report to a file instead of stdout")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "console: only print findings and the score")
 	cmd.Flags().BoolVar(&showPassed, "show-passed", false, "console: list every passed rule instead of a summary")
-	cmd.Flags().BoolVar(&omitSkipped, "omit-skipped", false, "json: drop rules with status skipped from the report (stats are unchanged)")
+	cmd.Flags().BoolVar(&omitSkipped, "omit-skipped", false, "json/sarif: drop rules with status skipped from the report (stats are unchanged)")
 	return cmd
 }
 
