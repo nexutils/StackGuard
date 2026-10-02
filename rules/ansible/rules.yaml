@@ -1,0 +1,1747 @@
+# ansible rules for StackGuard.
+id: ANS_SEC_001
+title: Password hardcoded in playbook
+severity: ERROR
+category: security
+target: ansible
+resource: ansible
+message: A password is hardcoded in a variable or task argument
+description: |
+  A literal password in a var or module argument is committed to the repo and
+  printed in verbose/CI output.
+remediation: |
+  Store it in Ansible Vault or an external secret manager; reference it as a var.
+query:
+  any:
+    - path: vars[*]
+      where:
+        all:
+          - path: name
+            matches: '(?i)(password|passwd|pwd|(^|_)pass($|_))'
+          - path: vaulted
+            equals: false
+          - path: value
+            matches: '\S'
+          - not:
+              path: value
+              matches: '^\s*(\{\{|\$ANSIBLE_VAULT)'
+    - path: tasks[*].arg_pairs[*]
+      where:
+        all:
+          - path: "@"
+            matches: '(?i)^[a-z0-9_.]*(password|passwd|pwd|(^|[_.])pass[_=])[a-z0-9_]*='
+          - path: "@"
+            matches: '=\s*\S'
+          - not:
+              path: "@"
+              matches: '=\s*(\{\{|\$)'
+---
+id: ANS_SEC_002
+title: Secret hardcoded in playbook
+severity: ERROR
+category: security
+target: ansible
+resource: ansible
+message: A secret or private key is hardcoded in a variable, task argument or file
+description: |
+  Client secrets, signing keys and private keys in plaintext let anyone with
+  repo access impersonate services or decrypt data.
+remediation: |
+  Move the value to Ansible Vault or a secret manager, and rotate it.
+query:
+  any:
+    - path: vars[*]
+      where:
+        all:
+          - path: name
+            matches: '(?i)(secret|private_?key|client_?secret|encryption_?key|signing_?key|master_?key|passphrase)'
+          - path: vaulted
+            equals: false
+          - path: value
+            matches: '\S'
+          - not:
+              path: value
+              matches: '^\s*(\{\{|\$ANSIBLE_VAULT)'
+    - path: tasks[*].arg_pairs[*]
+      where:
+        all:
+          - path: "@"
+            matches: '(?i)^[a-z0-9_.]*(secret|private_?key|client_?secret|passphrase)[a-z0-9_]*='
+          - path: "@"
+            matches: '=\s*\S'
+          - not:
+              path: "@"
+              matches: '=\s*(\{\{|\$)'
+    - path: strings[*]
+      matches: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+---
+id: ANS_SEC_003
+title: API token detected in playbook
+severity: ERROR
+category: security
+target: ansible
+resource: ansible
+message: An API token or cloud access key is stored in plaintext
+description: |
+  Tokens for GitHub, Slack, Stripe, cloud providers and similar grant direct
+  API access and are actively scanned for in leaked repos.
+remediation: |
+  Revoke the token, store the replacement in Vault or a secret manager.
+query:
+  any:
+    - path: vars[*]
+      where:
+        all:
+          - path: name
+            matches: '(?i)(token|api_?key|access_?key|auth_?key)'
+          - path: vaulted
+            equals: false
+          - path: value
+            matches: '\S'
+          - not:
+              path: value
+              matches: '^\s*(\{\{|\$ANSIBLE_VAULT)'
+    - path: strings[*]
+      matches: '(eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{32,}|glpat-[A-Za-z0-9_-]{20}|(AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35})'
+---
+id: ANS_SEC_004
+title: Ansible Vault not used for secrets
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: Secret variables exist but the project uses no Vault or secret manager
+description: |
+  Without Vault or an external secret store, secrets end up in plaintext in
+  group_vars, inventories or playbooks.
+remediation: |
+  Encrypt secret variables with ansible-vault, or fetch them with a secret
+  manager lookup.
+query:
+  all:
+    - path: vars[*]
+      where:
+        path: name
+        matches: '(?i)(password|passwd|(^|_)pass($|_)|secret|token|api_?key|private_?key)'
+    - not:
+        path: vars[*].vaulted
+        equals: true
+    - path: context.vault_files
+      exists: false
+    - not:
+        path: strings[*]
+        matches: '(hashi_vault|aws_secret|aws_ssm|azure_keyvault|gcp_secret_manager|cyberark|onepassword|bitwarden|conjur)'
+---
+id: ANS_SEC_005
+title: SSH host key verification disabled
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: SSH host key checking is turned off
+description: |
+  Without host key verification, Ansible connects to whatever answers, so a
+  man-in-the-middle can capture credentials and run tasks.
+remediation: |
+  Keep host_key_checking enabled and distribute known_hosts entries.
+query:
+  any:
+    - path: config.defaults.host_key_checking
+      equals: "false"
+    - path: vars[*]
+      where:
+        any:
+          - path: value
+            matches: 'StrictHostKeyChecking=(no|off)|UserKnownHostsFile=/dev/null'
+          - all:
+              - path: name
+                equals: ansible_host_key_checking
+              - path: value
+                matches: '(?i)^(false|no|0|off)$'
+    - path: tasks[*]
+      where:
+        all:
+          - path: module
+            equals: git
+          - path: args.accept_hostkey
+            equals: true
+---
+id: ANS_SEC_006
+title: become used globally
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: Privilege escalation is enabled for a whole play or globally
+description: |
+  Running every task as root widens the impact of a mistake or a compromised
+  role; most tasks do not need elevated privileges.
+remediation: |
+  Set become on the individual tasks or blocks that require it.
+query:
+  any:
+    - path: plays[*]
+      where:
+        path: become
+        equals: true
+    - path: config.privilege_escalation.become
+      equals: "true"
+---
+id: ANS_SEC_007
+title: Command executed without validation
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: A variable is interpolated into a shell command without the quote filter
+description: |
+  Unquoted Jinja values in command lines allow shell injection when a variable
+  contains spaces, semicolons or other shell metacharacters.
+remediation: |
+  Pipe interpolated values through the quote filter ({{ var | quote }}).
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [shell, command, raw]
+      - path: args.cmd
+        matches: '\{\{[^}]*\}\}'
+      - not:
+          path: args.cmd
+          matches: '\{\{[^}]*\|\s*quote[^}]*\}\}'
+---
+id: ANS_SEC_008
+title: Shell task executes remote script
+severity: ERROR
+category: security
+target: ansible
+resource: ansible
+message: A downloaded script is executed without an integrity check
+description: |
+  Scripts fetched from the network and executed directly run whatever the
+  remote server delivers, as the task user.
+remediation: |
+  Download with get_url and a pinned checksum, review the script, or use a
+  dedicated module.
+query:
+  path: tasks[*]
+  where:
+    any:
+      - all:
+          - path: module
+            in: [shell, command, raw, script]
+          - path: args.cmd
+            matches: '(https?://\S+\.(sh|bash|py|pl|ps1)\b|\b(ba|z|da)?sh\s+/tmp/\S+)'
+      - all:
+          - path: module
+            equals: get_url
+          - path: args.url
+            matches: '\.(sh|bash|py|pl|run|bin|ps1)$'
+          - path: args.checksum
+            exists: false
+---
+id: ANS_SEC_009
+title: curl | bash pattern detected
+severity: ERROR
+category: security
+target: ansible
+resource: ansible
+message: Remote content is piped directly into a shell or interpreter
+description: |
+  curl | bash executes unverified code, and a dropped connection can run a
+  partially downloaded script.
+remediation: |
+  Download the file with get_url and a checksum, inspect it, then run it.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [shell, command, raw]
+      - path: args.cmd
+        matches: '\b(curl|wget)\b[^;&]*\|\s*(sudo\s+)?(-E\s+)?((ba|z|da)?sh|python3?|perl)\b'
+---
+id: ANS_SEC_010
+title: File permissions may be insecure
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: A file is world-writable, a secret file is world-readable, or mode is a YAML integer
+description: |
+  World-writable files can be modified by any local user, secret files readable
+  by others leak credentials, and an unquoted mode such as 644 is read as a
+  decimal number.
+remediation: |
+  Use quoted octal modes ("0644"), remove world write, and use "0600"/"0640"
+  for secret files.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [file, copy, template, get_url, unarchive, assemble, lineinfile, blockinfile, replace]
+      - any:
+          - path: args.mode
+            matches: '^0?[0-7]?[0-7][0-7][2367]$'
+          - path: args.mode
+            matches: '(^|,)[oa]?[+=][rx]*w'
+          - path: args.mode
+            type: number
+          - all:
+              - path: args.dest
+                matches: '(?i)(\.(key|pem|p12|pfx)$|id_(rsa|ed25519|ecdsa)$|secret|password|credential|shadow$|\.vault)'
+              - path: args.mode
+                matches: '^0?[0-7]?[0-7][0-7][4-7]$'
+---
+id: ANS_SEC_011
+title: Secret handled without no_log
+severity: ERROR
+category: security
+target: ansible
+resource: ansible
+message: A task receives a secret but does not set no_log
+description: |
+  Even vaulted secrets are printed in task results, -v output and AWX/AAP job
+  logs unless the task sets no_log.
+remediation: |
+  Add no_log: true to every task that receives a password, token or key.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - any:
+          - path: arg_pairs[*]
+            matches: '(?i)^[a-z0-9_.]*(password|passwd|(^|[_.])pass[_=]|secret|token|api_?key|private_?key)[a-z0-9_]*=.+'
+          - path: arg_pairs[*]
+            matches: '(?i)\{\{[^}]*(password|passwd|secret|token|api_?key|private_?key)[^}]*\}\}'
+      - any:
+          - path: no_log
+            exists: false
+          - path: no_log
+            equals: false
+---
+id: ANS_SEC_012
+title: TLS certificate validation disabled
+severity: ERROR
+category: security
+target: ansible
+resource: ansible
+message: Certificate validation is disabled for HTTPS connections
+description: |
+  validate_certs: false accepts any certificate, so downloads, API calls and
+  Galaxy installs can be intercepted.
+remediation: |
+  Keep validation enabled and add the internal CA to the trust store.
+query:
+  any:
+    - path: tasks[*]
+      where:
+        path: args.validate_certs
+        equals: false
+    - path: vars[*]
+      where:
+        all:
+          - path: name
+            matches: '(?i)validate_certs$'
+          - path: value
+            matches: '(?i)^(false|no|0|off)$'
+    - path: config.galaxy.ignore_certs
+      equals: "true"
+---
+id: ANS_SEC_013
+title: Module or temp files exposed on target
+severity: ERROR
+category: security
+target: ansible
+resource: ansible
+message: Module payloads are kept on hosts or temp files are world-readable
+description: |
+  keep_remote_files leaves module files (and any secrets in them) on the host;
+  world-readable temp files expose the same data to other local users.
+remediation: |
+  Remove keep_remote_files and allow_world_readable_tmpfiles from ansible.cfg
+  and inventories.
+query:
+  any:
+    - path: config.defaults.keep_remote_files
+      equals: "true"
+    - path: config.defaults.allow_world_readable_tmpfiles
+      equals: "true"
+    - path: vars[*]
+      where:
+        all:
+          - path: name
+            in: [ansible_shell_allow_world_readable_temp, ansible_keep_remote_files]
+          - path: value
+            matches: '(?i)^(true|yes|1|on)$'
+---
+id: ANS_SEC_014
+title: Sensitive data written to output
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: Task arguments or secret variables are printed to output
+description: |
+  display_args_to_stdout prints every task argument, and debug tasks that show
+  secret variables put them in CI and job logs.
+remediation: |
+  Disable display_args_to_stdout and remove debug output of secret variables.
+query:
+  any:
+    - path: config.defaults.display_args_to_stdout
+      equals: "true"
+    - path: tasks[*]
+      where:
+        all:
+          - path: module
+            equals: debug
+          - any:
+              - path: args.var
+                matches: '(?i)(password|passwd|secret|token|api_?key|private_?key)'
+              - path: args.msg
+                matches: '(?i)\{\{[^}]*(password|passwd|secret|token|api_?key|private_?key)[^}]*\}\}'
+---
+id: ANS_SEC_015
+title: Credentials sent over unencrypted HTTP
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: An HTTP request sends credentials over plain http://
+description: |
+  Basic auth and authorization headers sent over HTTP can be read by anyone on
+  the network path.
+remediation: |
+  Use https:// endpoints for any request that carries credentials.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [uri, get_url]
+      - path: args.url
+        matches: '^http://'
+      - any:
+          - path: args.force_basic_auth
+            equals: true
+          - path: args.url_password
+            exists: true
+          - path: args.password
+            exists: true
+          - path: args.headers.Authorization
+            exists: true
+---
+id: ANS_SEC_016
+title: User password is not hashed
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: The user module receives a password that is not a crypt hash
+description: |
+  The user module writes the value directly to /etc/shadow, so a plaintext
+  password produces an account that cannot log in and leaks the password.
+remediation: |
+  Pass the password through password_hash or supply a precomputed crypt hash.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        equals: user
+      - path: args.password
+        exists: true
+      - not:
+          path: args.password
+          matches: '(password_hash|^\$(1|2[aby]?|5|6|y|gy)\$)'
+---
+id: ANS_SEC_017
+title: Weak cryptographic key generated
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: A generated key is smaller than 2048 bits or uses DSA
+description: |
+  RSA keys below 2048 bits and DSA keys are breakable or deprecated and are
+  rejected by modern OpenSSH and TLS stacks.
+remediation: |
+  Use RSA 3072/4096, ECDSA P-256 or later, or Ed25519.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [openssl_privatekey, openssh_keypair, openssl_privatekey_pipe]
+      - any:
+          - path: args.size
+            lt: 2048
+          - path: args.type
+            matches: '(?i)^dsa$'
+---
+id: ANS_SEC_018
+title: Database user granted excessive privileges
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: A database account gets global ALL privileges from any host, or SUPERUSER
+description: |
+  Accounts with *.*:ALL from '%' or PostgreSQL SUPERUSER can read and destroy
+  every database.
+remediation: |
+  Grant only the needed privileges on specific databases and restrict the host.
+query:
+  path: tasks[*]
+  where:
+    any:
+      - all:
+          - path: module
+            equals: mysql_user
+          - path: args.priv
+            matches: '(?i)\*\.\*:[^/]*\bALL\b'
+          - path: args.host
+            equals: "%"
+      - all:
+          - path: module
+            equals: postgresql_user
+          - path: args.role_attr_flags
+            matches: '(?i)(^|,)SUPERUSER(,|$)'
+---
+id: ANS_SEC_019
+title: SSH private key stored in repository
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: An SSH private key file is referenced from or stored in the project
+description: |
+  Private keys committed to the repo are available to everyone with read access
+  and remain in git history after deletion.
+remediation: |
+  Remove the key, rotate it, and load keys from ssh-agent or a vaulted file.
+query:
+  any:
+    - path: vars[*]
+      where:
+        all:
+          - path: name
+            in: [ansible_ssh_private_key_file, ansible_private_key_file]
+          - not:
+              path: value
+              matches: '^(/|~|\{\{)'
+    - all:
+        - path: config.defaults.private_key_file
+          exists: true
+        - not:
+            path: config.defaults.private_key_file
+            matches: '^(/|~)'
+    - path: context.files[*]
+      matches: '(^|/)(id_(rsa|dsa|ecdsa|ed25519)|[^/]*\.pem)$'
+---
+id: ANS_SEC_020
+title: Package signature verification disabled
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: A package repository or install skips GPG signature checks
+description: |
+  Unsigned or unverified packages can be replaced by a compromised mirror.
+remediation: |
+  Import the repository signing key and keep gpgcheck enabled.
+query:
+  path: tasks[*]
+  where:
+    any:
+      - all:
+          - path: module
+            equals: apt_repository
+          - path: args.repo
+            matches: 'trusted=yes'
+      - all:
+          - path: module
+            equals: deb822_repository
+          - path: args.trusted
+            equals: true
+      - all:
+          - path: module
+            equals: yum_repository
+          - path: args.gpgcheck
+            equals: false
+      - all:
+          - path: module
+            in: [yum, dnf, dnf5, package, zypper]
+          - path: args.disable_gpg_check
+            equals: true
+      - all:
+          - path: module
+            equals: apt
+          - path: args.allow_unauthenticated
+            equals: true
+---
+id: ANS_SEC_021
+title: become_user set without become
+severity: WARNING
+category: security
+target: ansible
+resource: ansible
+message: become_user is set but privilege escalation is not enabled
+description: |
+  Without become, become_user is ignored and the task runs as the connecting
+  user (ansible-lint partial-become).
+remediation: |
+  Set become: true alongside become_user on the same task, block or play.
+query:
+  any:
+    - path: tasks[*]
+      where:
+        all:
+          - path: become_user
+            exists: true
+          - path: become_effective
+            equals: false
+    - path: plays[*]
+      where:
+        all:
+          - path: become_user
+            exists: true
+          - any:
+              - path: become
+                exists: false
+              - path: become
+                equals: false
+---
+id: ANS_IDEM_001
+title: shell module used instead of dedicated module
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A shell/command task runs something a dedicated module can do
+description: |
+  Modules such as package, service, file, git and user are idempotent, support
+  check mode and report changes correctly; raw commands do none of this.
+remediation: |
+  Replace the command with the matching module, or use command instead of shell.
+query:
+  path: tasks[*]
+  where:
+    any:
+      - all:
+          - path: module
+            in: [shell, command, raw]
+          - path: args.cmd
+            matches: '^\s*(sudo\s+)?(apt(-get)?|yum|dnf|apk|zypper|pip3?|npm|gem|systemctl|service|useradd|usermod|userdel|groupadd|mkdir|rm|cp|mv|chmod|chown|ln|touch|git|wget|curl|tar|unzip|crontab|mount|sysctl|firewall-cmd|ufw|iptables|hostnamectl|timedatectl|update-alternatives|docker|kubectl|helm|openssl)\b'
+      - all:
+          - path: module
+            equals: shell
+          - not:
+              path: args.cmd
+              matches: '[|&;<>$*?`~]|\{\{'
+---
+id: ANS_IDEM_002
+title: command module may not be idempotent
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A command runs on every play without creates, removes, when or changed_when
+description: |
+  Unguarded commands run again on every execution and can change state
+  repeatedly.
+remediation: |
+  Add creates/removes, a when condition, or changed_when.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [command, shell, raw, script]
+      - path: args.creates
+        exists: false
+      - path: args.removes
+        exists: false
+      - path: when
+        exists: false
+      - path: changed_when
+        exists: false
+---
+id: ANS_IDEM_003
+title: changed_when not configured
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A command task always reports "changed"
+description: |
+  Commands report changed on every run, hiding real changes and triggering
+  handlers needlessly.
+remediation: |
+  Set changed_when, or use creates / removes.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [command, shell, raw, script]
+      - path: changed_when
+        exists: false
+      - path: args.creates
+        exists: false
+      - path: args.removes
+        exists: false
+---
+id: ANS_IDEM_004
+title: failed_when not configured
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: Errors are ignored or masked without a defined failure condition
+description: |
+  ignore_errors without failed_when swallows every failure, and a shell pipeline
+  only returns the exit code of its last command.
+remediation: |
+  Define failed_when, and start shell pipelines with "set -o pipefail".
+query:
+  path: tasks[*]
+  where:
+    any:
+      - all:
+          - path: ignore_errors
+            equals: true
+          - path: failed_when
+            exists: false
+      - all:
+          - path: module
+            equals: shell
+          - path: args.cmd
+            matches: '(^|[^|])\|([^|]|$)'
+          - not:
+              path: args.cmd
+              matches: 'set -o pipefail'
+          - path: failed_when
+            exists: false
+---
+id: ANS_IDEM_005
+title: Task may produce inconsistent state
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: The task installs or checks out a moving version
+description: |
+  state: latest, git branches and :latest image tags change between runs.
+remediation: |
+  Pin package versions, git tags or commit SHAs, and image tags or digests.
+query:
+  path: tasks[*]
+  where:
+    any:
+      - all:
+          - path: module
+            in: [package, apt, yum, dnf, apk, zypper, pip, npm, gem, homebrew, pacman, win_chocolatey]
+          - path: args.state
+            equals: latest
+      - all:
+          - path: module
+            equals: git
+          - any:
+              - path: args.version
+                exists: false
+              - path: args.version
+                in: [HEAD, main, master, develop, trunk]
+      - all:
+          - path: module
+            in: [docker_container, docker_image, podman_container, podman_image]
+          - any:
+              - path: args.image
+                matches: ':latest$'
+              - path: args.name
+                matches: ':latest$'
+      - all:
+          - path: run_once
+            equals: true
+          - path: module
+            in: [command, shell, raw]
+---
+id: ANS_IDEM_006
+title: Changed result checked instead of using a handler
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A task runs when another task's result is changed
+description: |
+  when: result.changed duplicates what handlers do and runs immediately rather
+  than once at the end of the play (ansible-lint no-handler).
+remediation: |
+  Move the follow-up action into a handler and notify it from the original task.
+query:
+  path: tasks[*]
+  where:
+    path: when[*]
+    matches: '^\s*(not\s+)?[A-Za-z0-9_]+(\.changed|\s+is\s+(not\s+)?changed)\s*$'
+---
+id: ANS_IDEM_007
+title: Errors ignored without justification
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: ignore_errors is used without an explanatory comment
+description: |
+  Unexplained ignore_errors makes it impossible to tell intended tolerance from
+  a hidden failure (ansible-lint ignore-errors).
+remediation: |
+  Prefer failed_when; if ignore_errors is required, add a comment explaining why.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: ignore_errors
+        equals: true
+      - path: comment
+        exists: false
+---
+id: ANS_IDEM_008
+title: File created without explicit permissions
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A file or directory is created without a mode
+description: |
+  Without mode, permissions depend on the target's umask and module defaults,
+  so they differ between hosts (ansible-lint risky-file-permissions).
+remediation: |
+  Set an explicit quoted mode, e.g. mode: "0644".
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: args.mode
+        exists: false
+      - any:
+          - path: module
+            in: [copy, template, get_url, assemble, unarchive]
+          - all:
+              - path: module
+                equals: file
+              - path: args.state
+                in: [touch, directory]
+---
+id: ANS_IDEM_009
+title: systemd unit changed without daemon reload
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A systemd unit file is written but systemd is never reloaded
+description: |
+  systemd keeps using the old unit definition until daemon-reload, so changes
+  silently do not take effect.
+remediation: |
+  Use ansible.builtin.systemd with daemon_reload: true (e.g. in a handler).
+query:
+  path: plays[*]
+  where:
+    all:
+      - path: tasks[*].args.dest
+        matches: '^/(etc|usr/lib|lib|run)/systemd/(system|user)/'
+      - not:
+          path: tasks[*].args.daemon_reload
+          equals: true
+      - not:
+          path: handlers[*].args.daemon_reload
+          equals: true
+      - not:
+          path: tasks[*].args.cmd
+          matches: 'systemctl\s+daemon-reload'
+      - not:
+          path: handlers[*].args.cmd
+          matches: 'systemctl\s+daemon-reload'
+---
+id: ANS_IDEM_010
+title: Service started but not enabled at boot
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A service is started without enabled being set
+description: |
+  The service runs now but does not come back after a reboot.
+remediation: |
+  Add enabled: true (or enabled: false if it is intentionally manual).
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [service, systemd, systemd_service]
+      - path: args.state
+        in: [started, restarted]
+      - path: args.enabled
+        exists: false
+---
+id: ANS_IDEM_011
+title: Firewall change not persistent or not applied
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A firewalld rule is runtime-only or permanent but not applied
+description: |
+  Runtime-only rules disappear on reload; permanent rules without immediate only
+  take effect after the next firewalld reload.
+remediation: |
+  Set both permanent: true and immediate: true.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        equals: firewalld
+      - any:
+          - path: args.permanent
+            exists: false
+          - path: args.permanent
+            equals: false
+          - all:
+              - path: args.permanent
+                equals: true
+              - any:
+                  - path: args.immediate
+                    exists: false
+                  - path: args.immediate
+                    equals: false
+---
+id: ANS_IDEM_012
+title: Kernel parameter written but not applied
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A sysctl value is written with reload disabled
+description: |
+  With reload: false and no sysctl_set, the value only lands in the config file
+  and stays inactive until reboot.
+remediation: |
+  Keep the default reload: true, or set sysctl_set: true.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        equals: sysctl
+      - path: args.reload
+        equals: false
+      - any:
+          - path: args.sysctl_set
+            exists: false
+          - path: args.sysctl_set
+            equals: false
+---
+id: ANS_IDEM_013
+title: Jinja templating used in when condition
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A when condition contains Jinja braces
+description: |
+  when is already a raw Jinja expression; nested templating is deprecated
+  (ansible-lint no-jinja-when).
+remediation: |
+  Remove the braces: when: my_var == "x".
+query:
+  path: tasks[*]
+  where:
+    path: when[*]
+    matches: '\{\{|\{%'
+---
+id: ANS_IDEM_014
+title: Comparison to literal boolean
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A when condition compares a value to true/false
+description: |
+  "x == true" fails when the value is the string "yes" or "True"
+  (ansible-lint literal-compare).
+remediation: |
+  Use the value directly (when: x) or with the bool filter (when: x | bool).
+query:
+  path: tasks[*]
+  where:
+    path: when[*]
+    matches: '(==|!=)\s*(true|false|True|False|yes|no)\b'
+---
+id: ANS_IDEM_015
+title: Inline environment variable in command
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: The command module is given an inline VAR=value prefix
+description: |
+  The command module does not use a shell, so FOO=bar is treated as the program
+  name and the task fails (ansible-lint inline-env-var).
+remediation: |
+  Set variables with the environment: keyword on the task.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        equals: command
+      - path: args.cmd
+        matches: '^\s*[A-Za-z_][A-Za-z0-9_]*=\S*\s'
+---
+id: ANS_IDEM_016
+title: run_once used with free strategy
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A play with strategy free contains run_once tasks
+description: |
+  Under the free strategy there is no defined first host, so which host runs a
+  run_once task is unpredictable (ansible-lint run-once).
+remediation: |
+  Use the linear strategy for plays with run_once tasks.
+query:
+  path: plays[*]
+  where:
+    all:
+      - path: strategy
+        equals: free
+      - path: tasks[*].run_once
+        equals: true
+---
+id: ANS_REL_001
+title: Error handling block missing
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A play with several tasks has no block/rescue error handling
+description: |
+  Without rescue sections, a failure halfway through leaves hosts in a partial
+  state with no cleanup or notification.
+remediation: |
+  Wrap related changes in block / rescue / always.
+query:
+  path: plays[*]
+  where:
+    all:
+      - path: task_count
+        gte: 5
+      - not:
+          path: blocks[*].rescue
+          exists: true
+---
+id: ANS_REL_002
+title: Rollback strategy not detected
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+enabled: false
+message: The project has no rescue tasks, rollback tasks or rollback playbook
+description: |
+  If a deployment fails there is no automated path back to the last working
+  state.
+remediation: |
+  Add rescue sections that restore the previous release, or a rollback playbook.
+query:
+  all:
+    - not:
+        path: tasks[*].in_rescue
+        equals: true
+    - not:
+        path: tasks[*].name
+        matches: '(?i)(rollback|roll back|revert|restore previous)'
+    - not:
+        path: context.files[*]
+        matches: '(?i)rollback'
+---
+id: ANS_REL_003
+title: Retry logic not configured
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A network-dependent task has no retries
+description: |
+  Downloads, package installs and API calls fail on transient network errors
+  and abort the whole run.
+remediation: |
+  Add retries, delay and until: result is succeeded.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [get_url, uri, git, apt, yum, dnf, package, pip, npm, docker_image, podman_image, unarchive, apt_key, apt_repository, rpm_key]
+      - path: retries
+        exists: false
+      - path: until
+        exists: false
+---
+id: ANS_REL_004
+title: Service restart validation missing
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A service is restarted without a check, or its config is not validated first
+description: |
+  A restart can fail silently, and writing an invalid sshd, sudoers or nginx
+  config can lock you out of the host.
+remediation: |
+  Follow restarts with wait_for/uri checks, and use validate: on template/copy.
+query:
+  any:
+    - path: plays[*]
+      where:
+        all:
+          - any:
+              - path: tasks[*].args.state
+                in: [restarted, reloaded]
+              - path: handlers[*].args.state
+                in: [restarted, reloaded]
+          - not:
+              path: tasks[*].module
+              in: [wait_for, uri, wait_for_connection, service_facts]
+          - not:
+              path: handlers[*].module
+              in: [wait_for, uri, wait_for_connection, service_facts]
+    - path: tasks[*]
+      where:
+        all:
+          - path: module
+            in: [template, copy, lineinfile, blockinfile]
+          - path: args.dest
+            matches: '(sshd_config|sudoers|nginx[^/]*\.conf|/nginx/|httpd\.conf|/apache2?/|haproxy\.cfg|named\.conf|postfix/main\.cf|/etc/fstab$)'
+          - path: args.validate
+            exists: false
+---
+id: ANS_REL_005
+title: Health validation missing after deployment
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A play deploys or restarts an application without a health check
+description: |
+  Without a post-deploy check, a broken release is reported as a successful run.
+remediation: |
+  Add a uri task with status_code against the health endpoint, or wait_for on
+  the service port.
+query:
+  path: plays[*]
+  where:
+    all:
+      - path: tasks[*].module
+        in: [docker_container, docker_compose, docker_compose_v2, podman_container, k8s, helm, unarchive, git, systemd, systemd_service, service, copy, template]
+      - not:
+          any:
+            - path: tasks[*]
+              where:
+                all:
+                  - path: module
+                    equals: uri
+                  - path: args.status_code
+                    exists: true
+            - path: tasks[*].module
+              in: [wait_for, k8s_info]
+---
+id: ANS_REL_006
+title: Task forces execution during check mode
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: "A state-changing task sets check_mode: false"
+description: |
+  check_mode: false makes the task run for real during --check, so a dry run
+  modifies hosts.
+remediation: |
+  Only use check_mode: false on read-only tasks.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: check_mode
+        equals: false
+      - path: module
+        not_in: [stat, find, slurp, setup, service_facts, package_facts, getent, uri, assert, debug, set_fact, include_vars, wait_for, command, shell]
+---
+id: ANS_REL_007
+title: Asynchronous task result never checked
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A fire-and-forget async task is never followed by async_status
+description: |
+  With poll: 0 Ansible does not wait for the job, so failures are never
+  reported.
+remediation: |
+  Register the job and check it later with async_status and until/retries.
+query:
+  all:
+    - path: tasks[*]
+      where:
+        all:
+          - path: async
+            exists: true
+          - path: poll
+            equals: 0
+    - not:
+        path: tasks[*].module
+        equals: async_status
+---
+id: ANS_REL_008
+title: Reboot executed without waiting for host
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: The host is rebooted through a shell command
+description: |
+  A shell reboot drops the connection, fails the task or lets the next task run
+  against a host that is still down.
+remediation: |
+  Use ansible.builtin.reboot, which waits for the host to come back.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [command, shell, raw]
+      - path: args.cmd
+        matches: '^\s*(sudo\s+)?(/s?bin/|/usr/s?bin/)?(reboot|shutdown\s+-r|systemctl\s+reboot|init\s+6)\b'
+---
+id: ANS_REL_009
+title: Delegated task runs concurrently for every host
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: A delegated task has neither run_once nor throttle
+description: |
+  delegate_to runs once per inventory host, all hitting the same delegate at
+  once.
+remediation: |
+  Add run_once: true if it should run once, or throttle to limit concurrency.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: delegate_to
+        exists: true
+      - any:
+          - path: run_once
+            exists: false
+          - path: run_once
+            equals: false
+      - path: throttle
+        exists: false
+---
+id: ANS_REL_010
+title: HTTP request timeout not set explicitly
+severity: WARNING
+category: reliability
+target: ansible
+resource: ansible
+message: An HTTP task relies on the module's default timeout
+description: |
+  The defaults (uri 30s, get_url 10s) rarely match slow endpoints or large
+  downloads.
+remediation: |
+  Set timeout explicitly for each uri / get_url task.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: module
+        in: [uri, get_url]
+      - path: args.timeout
+        exists: false
+---
+id: ANS_VAR_001
+title: Variable defined multiple times
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: The same variable is defined in more than one place
+description: |
+  Multiple definitions make the effective value depend on precedence rules. Role
+  defaults are ignored, since they exist to be overridden.
+remediation: |
+  Define each variable once at the right level and remove the duplicates.
+query:
+  path: var_counts.*
+  gte: 2
+---
+id: ANS_VAR_002
+title: Default values missing
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: A role uses variables that have no default value
+description: |
+  Without defaults, the role fails with "undefined variable" unless every caller
+  sets every variable.
+remediation: |
+  Define all role inputs in defaults/main.yml, or guard them with | default().
+query:
+  path: roles[*]
+  where:
+    any:
+      - path: vars_without_default
+        length_gte: 1
+      - path: has_defaults
+        equals: false
+---
+id: ANS_VAR_003
+title: Environment-specific values hardcoded
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: An IP address or environment-specific hostname is hardcoded
+description: |
+  Hardcoded hosts and IPs tie the code to one environment.
+remediation: |
+  Move the value into group_vars / host_vars or the inventory.
+query:
+  any:
+    - path: tasks[*].arg_pairs[*]
+      where:
+        all:
+          - not:
+              path: "@"
+              matches: '=.*\{\{'
+          - any:
+              - path: "@"
+                matches: '(?i)=[^=]*\b(prod|production|staging|stage|uat|qa|dev)[.-][a-z0-9.-]+'
+              - all:
+                  - path: "@"
+                    matches: '=[^=]*\b([0-9]{1,3}\.){3}[0-9]{1,3}\b'
+                  - not:
+                      path: "@"
+                      matches: '=[^=]*\b(127\.|0\.0\.0\.0)'
+    - path: plays[*]
+      where:
+        path: hosts
+        matches: '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b'
+---
+id: ANS_VAR_004
+title: Inventory contains sensitive values
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: An inventory, group_vars or host_vars file holds a plaintext secret
+description: |
+  Inventories are widely shared and often synced to AWX/AAP, so plaintext
+  passwords and keys there are broadly exposed.
+remediation: |
+  Encrypt the value with ansible-vault or move it to a vaulted vars file.
+query:
+  path: vars[*]
+  where:
+    all:
+      - path: source
+        in: [inventory, group_vars, host_vars]
+      - path: name
+        matches: '(?i)(password|passwd|(^|_)pass($|_)|secret|token|api_?key|private_?key|ansible_ssh_pass|ansible_become_pass)'
+      - path: vaulted
+        equals: false
+      - path: value
+        matches: '\S'
+      - not:
+          path: value
+          matches: '^\s*\{\{'
+---
+id: ANS_VAR_005
+title: Role variable not prefixed with role name
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: A role default or var does not start with the role name
+description: |
+  Unprefixed role variables collide with variables of other roles and
+  inventories (ansible-lint var-naming[no-role-prefix]).
+remediation: |
+  Rename the variable to <role_name>_<variable>.
+query:
+  path: vars[*]
+  where:
+    all:
+      - path: source
+        in: [role_defaults, role_vars]
+      - path: role_prefixed
+        equals: false
+---
+id: ANS_VAR_006
+title: Nested loop variable not renamed
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: An inner loop reuses the default loop variable "item"
+description: |
+  In nested loops the inner item shadows the outer one, so the outer value is
+  lost (ansible-lint loop-var-prefix).
+remediation: |
+  Set loop_control.loop_var to a unique name for the inner loop.
+query:
+  path: tasks[*]
+  where:
+    all:
+      - path: nested_loop
+        equals: true
+      - path: loop_control.loop_var
+        exists: false
+---
+id: ANS_VAR_007
+title: Task or play name missing
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: A task or play has no name
+description: |
+  Unnamed tasks show up as module calls in logs and AWX/AAP output, making
+  failures hard to trace (ansible-lint name[missing]).
+remediation: |
+  Give every play and task a descriptive name.
+query:
+  any:
+    - path: tasks[*]
+      where:
+        path: name
+        exists: false
+    - path: plays[*]
+      where:
+        path: name
+        exists: false
+---
+id: ANS_DEP_001
+title: Collection or role dependency not pinned
+severity: ERROR
+category: maintainability
+target: ansible
+resource: ansible
+message: A requirements.yml entry has no exact version
+description: |
+  An unpinned collection or role can change module behaviour between two runs of
+  the same playbook.
+remediation: |
+  Pin an exact version for every collection and role in requirements.yml.
+query:
+  path: context.requirements[*]
+  where:
+    any:
+      - path: version
+        exists: false
+      - path: version
+        matches: '^\s*(\*|latest|main|master|HEAD|>=?.*|>.*)\s*$'
+---
+id: ANS_DEP_002
+title: Module not referenced by fully qualified collection name
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: A task calls a module by short name instead of its FQCN
+description: |
+  Short module names resolve differently depending on installed collections;
+  FQCNs are unambiguous (ansible-lint fqcn).
+remediation: |
+  Use the fully qualified name, e.g. ansible.builtin.copy.
+query:
+  path: tasks[*].module_raw
+  not_matches: '^[a-z0-9_]+\.[a-z0-9_]+\.[a-z0-9_]+$'
+---
+id: ANS_DEP_003
+title: Deprecated module or syntax used
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: A task uses a deprecated module, keyword or loop syntax
+description: |
+  Deprecated keywords (local_action, sudo), bare with_* variables and removed
+  modules break on newer ansible-core.
+remediation: |
+  Replace with the current module/keyword and use loop: with an explicit list.
+query:
+  path: tasks[*]
+  where:
+    any:
+      - path: keywords
+        contains_any: [local_action, include, sudo, sudo_user, always_run]
+      - path: loop_raw
+        matches: '^[A-Za-z_][A-Za-z0-9_]*$'
+      - path: module
+        in: [docker, docker_service, ec2, ec2_ami_find, include, win_msi, synchronize_old]
+---
+id: ANS_DEP_004
+title: Relative path escapes the role
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+message: A task source path uses ../ to escape the role
+description: |
+  Reaching outside the role with ../ couples it to its location and breaks when
+  the role is moved or published.
+remediation: |
+  Reference files within the role, or pass the path as a variable.
+query:
+  path: tasks[*].args.src
+  matches: '(^|/)\.\./'
+---
+id: ANS_DEP_005
+title: Ansible version not pinned for execution
+severity: WARNING
+category: maintainability
+target: ansible
+resource: ansible
+enabled: false
+message: No execution environment or pinned ansible version was found
+description: |
+  Without a pinned ansible-core, the same playbook can behave differently across
+  controllers.
+remediation: |
+  Add an execution-environment.yml, or pin ansible-core in requirements.txt.
+query:
+  all:
+    - not:
+        path: context.files[*]
+        matches: '(^|/)execution-environment\.ya?ml$'
+    - not:
+        path: context.python_requirements[*]
+        matches: '(?i)^ansible(-core)?\s*(==|~=)'
+---
+id: ANS_PROD_001
+title: Monitoring configuration not detected
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+enabled: false
+message: No monitoring agent or role was detected
+description: |
+  Hosts provisioned without a monitoring agent are invisible to operations.
+remediation: |
+  Deploy a monitoring agent (node_exporter, datadog, telegraf, …) via a role.
+query:
+  all:
+    - not:
+        path: roles[*].name
+        matches: '(?i)(node_exporter|prometheus|grafana|alloy|datadog|zabbix|telegraf|newrelic|elastic[-_]agent|metricbeat|otel|opentelemetry|nagios|icinga|cloudwatch|netdata|monitoring)'
+    - not:
+        path: tasks[*].arg_pairs[*]
+        matches: '(?i)(node_exporter|prometheus|grafana-agent|alloy|datadog-agent|zabbix-agent|telegraf|newrelic|elastic-agent|metricbeat|otelcol|nagios|icinga|amazon-cloudwatch-agent|netdata)'
+---
+id: ANS_PROD_002
+title: Backup validation not detected
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+enabled: false
+message: No backup tasks were found, or backups are never verified
+description: |
+  Backups that do not exist, or that are never restore-tested, give false
+  confidence.
+remediation: |
+  Add backup tasks and a verification/restore-test step.
+query:
+  any:
+    - all:
+        - not:
+            path: tasks[*].arg_pairs[*]
+            matches: '(?i)(pg_dump|pg_basebackup|mysqldump|mongodump|restic|borg|rsnapshot|duplicity|bacula|velero|xtrabackup|backup)'
+        - not:
+            path: roles[*].name
+            matches: '(?i)backup'
+    - all:
+        - path: tasks[*].arg_pairs[*]
+          matches: '(?i)(pg_dump|pg_basebackup|mysqldump|mongodump|restic|borg|rsnapshot|duplicity|xtrabackup|backup)'
+        - not:
+            path: tasks[*].arg_pairs[*]
+            matches: '(?i)(restic\s+check|borg\s+check|pg_restore\s+--list|pg_verifybackup|xtrabackup\s+--prepare|--verify|verify|restore[-_ ]test)'
+---
+id: ANS_PROD_003
+title: Security hardening tasks missing
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+enabled: false
+message: No hardening role, SSH hardening or host firewall was detected
+description: |
+  Hosts provisioned without baseline hardening are exposed.
+remediation: |
+  Apply a hardening role (CIS/STIG/devsec), SSH hardening and a host firewall.
+query:
+  all:
+    - not:
+        path: roles[*].name
+        matches: '(?i)(harden|hardening|cis|stig|devsec|security|baseline)'
+    - not:
+        path: tasks[*].arg_pairs[*]
+        matches: '(PermitRootLogin|PasswordAuthentication)'
+    - not:
+        path: tasks[*].module
+        in: [ufw, firewalld, iptables, nftables, win_firewall_rule]
+---
+id: ANS_PROD_004
+title: Audit logging configuration missing
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+enabled: false
+message: Host audit logging or Ansible run logging is not configured
+description: |
+  Without auditd/syslog management or Ansible run logging there is no record of
+  changes.
+remediation: |
+  Manage auditd/rsyslog, and set log_path or a logging callback in ansible.cfg.
+query:
+  any:
+    - all:
+        - not:
+            path: tasks[*].arg_pairs[*]
+            matches: '(?i)(auditd|audit\.rules|/etc/audit/|rsyslog|syslog-ng|journald\.conf)'
+        - not:
+            path: roles[*].name
+            matches: '(?i)(auditd|audit|rsyslog|syslog|logging)'
+    - all:
+        - path: config.defaults.log_path
+          exists: false
+        - not:
+            path: config.defaults.callbacks_enabled
+            matches: '(ara|splunk|logstash|syslog_json|elastic|log_plays)'
+---
+id: ANS_PROD_005
+title: Production readiness validation missing
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+enabled: false
+message: A production play has no serial, failure threshold or pre-flight checks
+description: |
+  Changing all production hosts at once with no stop condition or checks risks a
+  full outage.
+remediation: |
+  Set serial, max_fail_percentage/any_errors_fatal, and pre-flight assert/fail
+  tasks.
+query:
+  path: plays[*]
+  where:
+    all:
+      - path: hosts
+        matches: '(?i)(prod|production|^all$)'
+      - any:
+          - path: serial
+            exists: false
+          - all:
+              - path: max_fail_percentage
+                exists: false
+              - path: any_errors_fatal
+                exists: false
+          - not:
+              path: tasks[*].module
+              in: [assert, fail]
+---
+id: ANS_PROD_006
+title: Role has no automated tests
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+message: A role has no molecule or tests directory
+description: |
+  A role with no tests can regress silently when it or its dependencies change.
+remediation: |
+  Add a molecule scenario (or a tests/ directory) that exercises the role.
+query:
+  path: roles[*]
+  where:
+    path: has_tests
+    equals: false
+---
+id: ANS_PROD_007
+title: Linting not enforced
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+enabled: false
+message: No .ansible-lint config, or a weak profile, was found
+description: |
+  Without ansible-lint at a meaningful profile, style and safety regressions go
+  uncaught.
+remediation: |
+  Add a .ansible-lint with a profile of safety, shared or production.
+query:
+  any:
+    - path: context.ansible_lint_config
+      exists: false
+    - path: context.ansible_lint_config.profile
+      not_in: [safety, shared, production]
+---
+id: ANS_PROD_008
+title: Play has no tags for partial runs
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+message: A play and its tasks define no tags
+description: |
+  Without tags you cannot run or skip part of a playbook, so every change means
+  a full run.
+remediation: |
+  Add tags to plays or tasks to allow targeted runs.
+query:
+  path: plays[*]
+  where:
+    all:
+      - path: tags
+        exists: false
+      - not:
+          path: tasks[*].tags
+          exists: true
+---
+id: ANS_PROD_009
+title: Role is too large to maintain
+severity: WARNING
+category: operational
+target: ansible
+resource: ansible
+message: A role has 50 or more tasks
+description: |
+  Very large roles are hard to understand, test and reuse.
+remediation: |
+  Split the role into smaller, focused roles.
+query:
+  path: roles[*].task_count
+  gte: 50
