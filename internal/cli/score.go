@@ -23,7 +23,7 @@ exits with code 1 when the score is lower.`,
 		Example: `  stackguard score .
   stackguard score . --min-score 80 --format json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, rep, err := a.runScan(cmd, &sf, args)
+			cfg, rep, err := a.runScan(cmd, &sf, args, true)
 			if err != nil {
 				return err
 			}

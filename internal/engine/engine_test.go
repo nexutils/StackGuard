@@ -3,6 +3,9 @@ package engine
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
 	"testing"
 
 	"go.yaml.in/yaml/v3"
@@ -43,6 +46,30 @@ func newEngine(t testing.TB, opts Options, rules ...*models.Rule) *Engine {
 		t.Fatal(err)
 	}
 	return e
+}
+
+func TestScanProgress(t *testing.T) {
+	privileged := rule(t, "COMP_SEC_001", models.SeverityError, `{path: privileged, equals: true}`)
+	var stages []string
+	var last ScanPhase
+	e := newEngine(t, Options{Progress: func(p ScanPhase) {
+		stages = append(stages, p.Stage)
+		last = p
+	}}, privileged)
+
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "docker-compose.yml"), []byte(composeFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Scan(context.Background(), []string{dir}); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"discovering", "parsing", "evaluating"}; !reflect.DeepEqual(stages, want) {
+		t.Fatalf("progress stages = %v, want %v", stages, want)
+	}
+	if last.Rules != 1 || last.Resources == 0 || last.Files == 0 {
+		t.Fatalf("evaluating phase should carry counts, got %+v", last)
+	}
 }
 
 func TestScanSources(t *testing.T) {

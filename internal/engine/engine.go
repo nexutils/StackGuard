@@ -48,6 +48,20 @@ type Options struct {
 	// Scorer computes the score; nil means score.Default().
 	Scorer score.Scorer
 	Logger *slog.Logger
+	// Progress, if set, receives coarse phase updates during a scan so a
+	// caller can render a spinner. It is called sequentially from the
+	// goroutine that invoked Scan, never concurrently with itself.
+	Progress func(ScanPhase)
+}
+
+// ScanPhase is a coarse progress update emitted during a scan. Counts are
+// filled in as they become known, so earlier phases carry fewer of them.
+type ScanPhase struct {
+	// Stage is one of "discovering", "parsing" or "evaluating".
+	Stage     string
+	Files     int
+	Resources int
+	Rules     int
 }
 
 // Engine evaluates a fixed set of rules. It is safe for concurrent use.
@@ -112,9 +126,17 @@ func (e *Engine) targetEnabled(t string) bool {
 	return len(e.opts.Targets) == 0 || slices.Contains(e.opts.Targets, t)
 }
 
+// report emits a progress update when a Progress callback is configured.
+func (e *Engine) report(p ScanPhase) {
+	if e.opts.Progress != nil {
+		e.opts.Progress(p)
+	}
+}
+
 // Scan discovers and scans files under the given paths.
 func (e *Engine) Scan(ctx context.Context, paths []string) (*models.Report, error) {
 	start := time.Now()
+	e.report(ScanPhase{Stage: "discovering"})
 	files, err := discovery.Discover(ctx, paths, discovery.Options{
 		Exclude:     e.opts.Exclude,
 		MaxFileSize: e.opts.MaxFileSize,
@@ -154,6 +176,7 @@ type parsed struct {
 }
 
 func (e *Engine) run(ctx context.Context, inputs []input, start time.Time) (*models.Report, error) {
+	e.report(ScanPhase{Stage: "parsing", Files: len(inputs)})
 	results := make([]parsed, len(inputs))
 	g, gctx := errgroup.WithContext(ctx)
 	jobs := e.opts.Jobs
@@ -197,6 +220,7 @@ func (e *Engine) run(ctx context.Context, inputs []input, start time.Time) (*mod
 	}
 	rep.Stats.Resources = len(resources)
 
+	e.report(ScanPhase{Stage: "evaluating", Files: rep.Stats.FilesParsed, Resources: len(resources), Rules: len(e.rules)})
 	findings, ruleResults := e.Evaluate(resources)
 	for _, f := range findings {
 		if s := supp[f.File]; s != nil && s.suppressed(f.RuleID, f.Line) {

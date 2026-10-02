@@ -60,7 +60,7 @@ func newScanCommand(a *app) *cobra.Command {
   stackguard scan . --format sarif --output stackguard.sarif
   stackguard scan . --fail-on warning --min-score 80`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg, rep, err := a.runScan(cmd, &sf, args)
+			cfg, rep, err := a.runScan(cmd, &sf, args, !quiet)
 			if err != nil {
 				return err
 			}
@@ -79,8 +79,10 @@ func newScanCommand(a *app) *cobra.Command {
 	return cmd
 }
 
-// runScan loads configuration and rules, then scans paths.
-func (a *app) runScan(cmd *cobra.Command, sf *scanFlags, paths []string) (config.Resolved, *models.Report, error) {
+// runScan loads configuration and rules, then scans paths. When interactive is
+// true and stderr is a color-capable terminal, a progress spinner is shown
+// while the scan runs.
+func (a *app) runScan(cmd *cobra.Command, sf *scanFlags, paths []string, interactive bool) (config.Resolved, *models.Report, error) {
 	cfg, baseDir, err := a.loadConfig(cmd, scanBindings...)
 	if err != nil {
 		return cfg, nil, err
@@ -98,6 +100,14 @@ func (a *app) runScan(cmd *cobra.Command, sf *scanFlags, paths []string) (config
 		}
 	}
 
+	var progress func(engine.ScanPhase)
+	if interactive && a.colorEnabled(a.errOut) {
+		sp := newSpinner(a.errOut)
+		sp.start()
+		defer sp.stop()
+		progress = sp.update
+	}
+
 	disabled := append(append([]string{}, cfg.DisabledRules...), upper(sf.disable)...)
 	enabled := append(append([]string{}, cfg.EnabledRules...), upper(sf.enable)...)
 	e, err := engine.New(set.All(), engine.Options{
@@ -108,6 +118,7 @@ func (a *app) runScan(cmd *cobra.Command, sf *scanFlags, paths []string) (config
 		Exclude:           append(append([]string{}, cfg.Exclude...), sf.exclude...),
 		Jobs:              sf.jobs,
 		Logger:            a.log,
+		Progress:          progress,
 	})
 	if err != nil {
 		return cfg, nil, usageError("%v", err)
