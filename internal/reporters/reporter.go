@@ -19,6 +19,9 @@ type Options struct {
 	Color bool
 	// Quiet limits console output to findings and the score line.
 	Quiet bool
+	// ShowPassed lists every passed rule in the console reporter. When false
+	// (the default) passed rules are collapsed to a summary line.
+	ShowPassed bool
 	// ToolVersion is embedded in machine-readable formats.
 	ToolVersion string
 	// BaseDir is used to make file paths relative (SARIF requires relative

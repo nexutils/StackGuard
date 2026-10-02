@@ -47,9 +47,10 @@ var scanBindings = []flagBinding{
 
 func newScanCommand(a *app) *cobra.Command {
 	var (
-		sf     scanFlags
-		output string
-		quiet  bool
+		sf         scanFlags
+		output     string
+		quiet      bool
+		showPassed bool
 	)
 	cmd := &cobra.Command{
 		Use:   "scan [path...]",
@@ -63,7 +64,7 @@ func newScanCommand(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := a.writeReport(cfg.Format, output, quiet, rep); err != nil {
+			if err := a.writeReport(cfg.Format, output, quiet, showPassed, rep); err != nil {
 				return err
 			}
 			return gate(cfg, rep)
@@ -74,6 +75,7 @@ func newScanCommand(a *app) *cobra.Command {
 	cmd.Flags().String("fail-on", "", "minimum severity that fails the scan: error, warning, info or none (default \"error\")")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "write the report to a file instead of stdout")
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "console: only print findings and the score")
+	cmd.Flags().BoolVar(&showPassed, "show-passed", false, "console: list every passed rule instead of a summary")
 	return cmd
 }
 
@@ -120,7 +122,7 @@ func (a *app) runScan(cmd *cobra.Command, sf *scanFlags, paths []string) (config
 	return cfg, rep, nil
 }
 
-func (a *app) writeReport(format, output string, quiet bool, rep *models.Report) error {
+func (a *app) writeReport(format, output string, quiet, showPassed bool, rep *models.Report) error {
 	var (
 		w     io.Writer = a.out
 		color           = a.colorEnabled(a.out)
@@ -136,6 +138,7 @@ func (a *app) writeReport(format, output string, quiet bool, rep *models.Report)
 	r, err := reporterall.New(format, reporters.Options{
 		Color:       color,
 		Quiet:       quiet,
+		ShowPassed:  showPassed,
 		ToolVersion: version.Get().Version,
 	})
 	if err != nil {

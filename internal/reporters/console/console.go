@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"sort"
 	"strings"
 
 	"github.com/nexutils/StackGuard/internal/models"
@@ -68,22 +69,20 @@ func (c *Reporter) Report(out io.Writer, r *models.Report) error {
 
 	if !c.opts.Quiet {
 		var passed []models.RuleResult
+		var failed int
 		for _, rr := range r.Results {
-			if rr.Status == models.RulePassed {
+			switch rr.Status {
+			case models.RulePassed:
 				passed = append(passed, rr)
+			case models.RuleFailed:
+				failed++
 			}
 		}
 		if len(passed) > 0 {
-			fmt.Fprintf(w, "\n%s\n", c.paint(bold, "Passed"))
-			for _, rr := range passed {
-				text := rr.RuleID
-				if rr.Rule != nil {
-					text = rr.Rule.PassMessage
-					if text == "" {
-						text = rr.Rule.Title
-					}
-				}
-				fmt.Fprintf(w, "  %s %s  %s\n", c.paint(green, "✓"), text, c.paint(dim, rr.RuleID))
+			if c.opts.ShowPassed {
+				c.writePassedList(w, passed)
+			} else {
+				c.writePassedSummary(w, passed, failed)
 			}
 		}
 		if len(r.Diagnostics) > 0 {
@@ -106,6 +105,86 @@ func (c *Reporter) Report(out io.Writer, r *models.Report) error {
 		fmt.Fprintln(w, c.paint(dim, "Run 'stackguard explain <RULE_ID>' for details and remediation."))
 	}
 	return w.Flush()
+}
+
+// writePassedList prints one line per passed rule (shown with --show-passed).
+func (c *Reporter) writePassedList(w io.Writer, passed []models.RuleResult) {
+	fmt.Fprintf(w, "\n%s\n", c.paint(bold, "Passed"))
+	for _, rr := range passed {
+		text := rr.RuleID
+		if rr.Rule != nil {
+			text = rr.Rule.PassMessage
+			if text == "" {
+				text = rr.Rule.Title
+			}
+		}
+		fmt.Fprintf(w, "  %s %s  %s\n", c.paint(green, "✓"), text, c.paint(dim, rr.RuleID))
+	}
+}
+
+// writePassedSummary collapses passed rules to a count, a per-target breakdown
+// and a pass-ratio bar. This is the default so findings stay on screen.
+func (c *Reporter) writePassedSummary(w io.Writer, passed []models.RuleResult, failed int) {
+	counts := map[string]int{}
+	var order []string
+	for _, rr := range passed {
+		t := "other"
+		if rr.Rule != nil && rr.Rule.Target != "" {
+			t = rr.Rule.Target
+		}
+		if counts[t] == 0 {
+			order = append(order, t)
+		}
+		counts[t]++
+	}
+	sort.Slice(order, func(i, j int) bool {
+		if counts[order[i]] != counts[order[j]] {
+			return counts[order[i]] > counts[order[j]]
+		}
+		return order[i] < order[j]
+	})
+	parts := make([]string, len(order))
+	for i, t := range order {
+		parts[i] = fmt.Sprintf("%s %d", t, counts[t])
+	}
+
+	fmt.Fprintf(w, "\n%s", c.paint(green, fmt.Sprintf("✓ %d passed", len(passed))))
+	if len(parts) > 0 {
+		fmt.Fprintf(w, "  %s", c.paint(dim, strings.Join(parts, " · ")))
+	}
+	fmt.Fprintln(w)
+
+	total := len(passed) + failed
+	fmt.Fprintf(w, "  %s  %s\n", c.passBar(len(passed), total),
+		c.paint(dim, fmt.Sprintf("%d/%d · %d%%   run with --show-passed to list", len(passed), total, pct(len(passed), total))))
+}
+
+// passBar renders a fixed-width pass-ratio bar, degrading to ASCII when colors
+// are disabled.
+func (c *Reporter) passBar(passed, total int) string {
+	const width = 24
+	fill := width
+	if total > 0 {
+		fill = passed * width / total
+		if fill == 0 && passed > 0 {
+			fill = 1
+		}
+	}
+	if fill > width {
+		fill = width
+	}
+	if !c.opts.Color {
+		return "[" + strings.Repeat("#", fill) + strings.Repeat("-", width-fill) + "]"
+	}
+	return c.paint(green, strings.Repeat("█", fill)) + c.paint(dim, strings.Repeat("░", width-fill))
+}
+
+// pct returns n/d as a rounded percentage, guarding against division by zero.
+func pct(n, d int) int {
+	if d <= 0 {
+		return 0
+	}
+	return (n*100 + d/2) / d
 }
 
 func plural(n int, one, many string) string {
