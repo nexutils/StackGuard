@@ -252,6 +252,44 @@ func TestCountGte(t *testing.T) {
 	}
 }
 
+func TestEqualsRef(t *testing.T) {
+	data := map[string]any{
+		"probeA": map[string]any{"httpGet": map[string]any{"path": "/healthz", "port": 8080}},
+		"probeB": map[string]any{"httpGet": map[string]any{"path": "/healthz", "port": 8080}},
+		"probeC": map[string]any{"httpGet": map[string]any{"path": "/ready", "port": 8080}},
+		"min":    2,
+		"max":    2,
+		"other":  5,
+	}
+	tests := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		{"identical maps", `{path: probeA, equals_ref: probeB}`, true},
+		{"different maps", `{path: probeA, equals_ref: probeC}`, false},
+		{"equal numbers", `{path: min, equals_ref: max}`, true},
+		{"different numbers", `{path: min, equals_ref: other}`, false},
+		{"missing ref", `{path: min, equals_ref: nope}`, false},
+		{"missing path", `{path: nope, equals_ref: min}`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var raw any
+			if err := yaml.Unmarshal([]byte(tt.query), &raw); err != nil {
+				t.Fatal(err)
+			}
+			c, err := Compile(raw)
+			if err != nil {
+				t.Fatalf("Compile: %v", err)
+			}
+			if got, _ := Eval(c, data, ""); got != tt.want {
+				t.Fatalf("Eval = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestCompileErrors(t *testing.T) {
 	bad := []string{
 		`[]`,
@@ -269,6 +307,8 @@ func TestCompileErrors(t *testing.T) {
 		`{path: a, where: {}}`,
 		`{path: a, gt_ref: 5}`,
 		`{path: a, gt_ref: "b..c"}`,
+		`{path: a, equals_ref: 5}`,
+		`{path: a, equals_ref: "b..c"}`,
 		`{path: a, count_gte: 2}`,
 		`{path: a, count_gte: 2, equals: 1, exists: true}`,
 		`{path: a, count_gte: "x", equals: 1}`,

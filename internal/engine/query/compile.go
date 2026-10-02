@@ -11,19 +11,20 @@ import (
 // Reserved query keys. Any other key in a leaf is looked up in the operator
 // registry.
 const (
-	keyAll      = "all"
-	keyAny      = "any"
-	keyNot      = "not"
-	keyPath     = "path"
-	keyWhere    = "where"
-	keyGtRef    = "gt_ref"
-	keyLtRef    = "lt_ref"
-	keyCountGte = "count_gte"
+	keyAll       = "all"
+	keyAny       = "any"
+	keyNot       = "not"
+	keyPath      = "path"
+	keyWhere     = "where"
+	keyGtRef     = "gt_ref"
+	keyLtRef     = "lt_ref"
+	keyEqualsRef = "equals_ref"
+	keyCountGte  = "count_gte"
 )
 
 // operatorNames lists registered operators plus the structural leaf keys.
 func operatorNames() []string {
-	names := append(operators.Names(), keyGtRef, keyLtRef, keyWhere, keyCountGte)
+	names := append(operators.Names(), keyGtRef, keyLtRef, keyEqualsRef, keyWhere, keyCountGte)
 	sort.Strings(names)
 	return names
 }
@@ -36,6 +37,8 @@ func hasCaptures(c Condition) bool {
 	case *Where:
 		return t.captures
 	case *RefCompare:
+		return t.Path.HasCaptures() || t.Ref.HasCaptures()
+	case *RefEquals:
 		return t.Path.HasCaptures() || t.Ref.HasCaptures()
 	case *CountAtLeast:
 		return t.Path.HasCaptures()
@@ -179,7 +182,7 @@ func compileLeaf(m map[string]any, where string) (Condition, error) {
 			return nil, err
 		}
 		return &Where{Path: p, Cond: sub, captures: p.HasCaptures() || hasCaptures(sub)}, nil
-	case keyGtRef, keyLtRef:
+	case keyGtRef, keyLtRef, keyEqualsRef:
 		refStr, ok := m[opName].(string)
 		if !ok {
 			return nil, fmt.Errorf("%s: %s: expects a path, got %s", where, opName, describe(m[opName]))
@@ -187,6 +190,9 @@ func compileLeaf(m map[string]any, where string) (Condition, error) {
 		ref, err := ParsePath(refStr)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %s: %w", where, opName, err)
+		}
+		if opName == keyEqualsRef {
+			return &RefEquals{Path: p, Ref: ref}, nil
 		}
 		cmp := func(a, b float64) bool { return a > b }
 		if opName == keyLtRef {
