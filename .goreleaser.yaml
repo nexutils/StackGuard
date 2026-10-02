@@ -1,0 +1,43 @@
+version: 2
+
+project_name: stackguard
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: stackguard
+    main: ./cmd/stackguard
+    binary: stackguard
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/nexutils/StackGuard/internal/version.Version={{ .Version }}
+      - -X github.com/nexutils/StackGuard/internal/version.Commit={{ .ShortCommit }}
+      - -X github.com/nexutils/StackGuard/internal/version.Date={{ .Date }}
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"

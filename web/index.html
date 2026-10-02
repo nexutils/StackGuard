@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StackGuard: production-readiness scanning for your stack</title>
+<meta name="description" content="StackGuard scans Terraform, Kubernetes, Helm, Docker and CI pipelines against policy as code, then scores every result.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#121211">
+<link rel="canonical" href="https://nexutils.github.io/StackGuard/">
+<!-- Social / Open Graph -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="StackGuard">
+<meta property="og:title" content="StackGuard: production-readiness scanning for your stack">
+<meta property="og:description" content="Scan Terraform, Kubernetes, Helm, Docker and CI pipelines against policy as code, then score every result.">
+<meta property="og:url" content="https://nexutils.github.io/StackGuard/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="StackGuard">
+<meta name="twitter:description" content="Production-readiness scanning for infrastructure and deployment configuration.">
+<!-- Inline SVG favicon: no separate file to 404 under a project subpath -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23121211'/%3E%3Cpath d='M16 5 25 8.4v6.3c0 5.5-3.7 9.3-9 10.6-5.3-1.3-9-5.1-9-10.6V8.4L16 5Z' fill='none' stroke='%235ec46e' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M12 16l3 3 5.5-6' fill='none' stroke='%235ec46e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  /* ----- Design tokens (dark-locked, extends StackGuard's own report palette) ----- */
+  :root {
+    --bg:        #121211;
+    --bg-2:      #171716;
+    --panel:     #1c1c1a;
+    --panel-2:   #222220;
+    --text:      #ededea;
+    --muted:     #a0a099;
+    --faint:     #6f6f68;
+    --border:    #302f2c;
+    --border-2:  #3b3a36;
+
+    --accent:    #5ec46e;   /* single locked accent */
+    --accent-dim:#3f7f49;
+    --accent-ink:#0d1a0f;
+
+    --error:   #ef6b6b;  --error-bg:   #2c1817;
+    --warning: #f0a93b;  --warning-bg: #2b2112;
+    --info:    #6aa8f0;  --info-bg:    #15202f;
+
+    /* shape scale: buttons/inputs 10px, cards/panels 14px, pills 999px */
+    --r-btn: 10px;
+    --r-card: 14px;
+    --r-pill: 999px;
+
+    --maxw: 1200px;
+    --ease: cubic-bezier(.16,1,.3,1);
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  :where(img, svg) { max-width: 100%; }
+
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Hanken Grotesk", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  /* ambient field: faint grid + a single low radial, no AI-glow */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: -2;
+    background:
+      radial-gradient(900px 520px at 78% -8%, rgba(94,196,110,.10), transparent 62%),
+      linear-gradient(to bottom, var(--bg-2), var(--bg) 42%);
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    opacity: .5;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 56px 56px;
+    -webkit-mask-image: radial-gradient(1200px 700px at 50% -5%, #000 0%, transparent 72%);
+            mask-image: radial-gradient(1200px 700px at 50% -5%, #000 0%, transparent 72%);
+  }
+
+  a { color: inherit; text-decoration: none; }
+  h1, h2, h3 { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; margin: 0; text-wrap: balance; }
+  p { margin: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .skip-link { position: absolute; left: 12px; top: -48px; z-index: 100; background: var(--accent); color: var(--accent-ink); font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 14px; padding: 9px 14px; border-radius: var(--r-btn); transition: top .15s var(--ease); }
+  .skip-link:focus-visible { top: 12px; }
+
+  .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+  .mono { font-family: var(--mono); }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); margin: 0 0 18px; }
+  .lede { color: var(--muted); font-size: 17px; max-width: 60ch; }
+
+  /* ----- buttons ----- */
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15px;
+    padding: 11px 18px; border-radius: var(--r-btn);
+    border: 1px solid transparent; cursor: pointer; white-space: nowrap;
+    transition: transform .18s var(--ease), background .18s var(--ease), border-color .18s var(--ease);
+  }
+  .btn svg { width: 17px; height: 17px; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover { background: #71d481; transform: translateY(-1px); }
+  .btn-primary:active { transform: translateY(0); }
+  .btn-ghost { background: transparent; color: var(--text); border-color: var(--border-2); }
+  .btn-ghost:hover { border-color: var(--faint); background: rgba(255,255,255,.03); transform: translateY(-1px); }
+  .btn-sm { padding: 8px 13px; font-size: 14px; }
+
+  /* ----- nav ----- */
+  header.nav {
+    position: sticky; top: 0; z-index: 50;
+    height: 68px; display: flex; align-items: center;
+    background: rgba(18,18,17,.72);
+    backdrop-filter: saturate(160%) blur(12px);
+    -webkit-backdrop-filter: saturate(160%) blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+  .brand .mark { width: 26px; height: 26px; }
+  .nav-links { display: flex; align-items: center; gap: 28px; }
+  .nav-links a { color: var(--muted); font-size: 15px; transition: color .15s var(--ease); }
+  .nav-links a:hover { color: var(--text); }
+  .nav-right { display: flex; align-items: center; gap: 14px; }
+  .nav-right .gh { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  .nav-right .gh:hover { color: var(--text); }
+  .nav-right .gh svg { width: 18px; height: 18px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  /* ----- hero ----- */
+  .hero { padding: 72px 0 40px; }
+  .hero-grid { display: grid; grid-template-columns: 1.05fr 1fr; gap: 56px; align-items: center; }
+  .hero h1 { font-size: clamp(2.4rem, 5.2vw, 3.9rem); }
+  .hero h1 .hl { color: var(--accent); }
+  .hero .lede { margin-top: 22px; font-size: 18px; }
+  .hero-cta { display: flex; gap: 14px; margin-top: 30px; flex-wrap: wrap; }
+  .factbar { padding: 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: var(--bg-2); }
+  .factbar .wrap { display: flex; flex-wrap: wrap; gap: 12px 30px; padding-top: 15px; padding-bottom: 15px; }
+  .factbar span { color: var(--faint); font-family: var(--mono); font-size: 12.5px; }
+  .factbar b { color: var(--muted); font-weight: 500; }
+  @media (max-width: 920px) {
+    .hero { padding: 44px 0 20px; }
+    .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+  }
+
+  /* ----- terminal ----- */
+  .term {
+    background: #0e0e0d; border: 1px solid var(--border-2); border-radius: var(--r-card);
+    overflow: hidden; box-shadow: 0 30px 70px -30px rgba(0,0,0,.8);
+  }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 11px 15px; border-bottom: 1px solid var(--border); background: #151413; }
+  .term-bar .dot { width: 11px; height: 11px; border-radius: 50%; background: #35342f; }
+  .term-bar .ttl { margin-left: 8px; font-family: var(--mono); font-size: 12px; color: var(--faint); }
+  .term-bar .sp { flex: 1; }
+  .term-pause { appearance: none; background: transparent; border: 0; color: var(--faint); cursor: pointer; display: inline-flex; padding: 3px; border-radius: 6px; transition: color .15s var(--ease); }
+  .term-pause:hover { color: var(--text); }
+  .term-pause:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .term-pause svg { width: 15px; height: 15px; display: block; }
+  .term-body { padding: 16px 18px; font-family: var(--mono); font-size: 13px; line-height: 1.85; overflow-x: auto; }
+  .term-body .ln { white-space: pre; }
+  .term-body .prompt { color: var(--accent); }
+  .term-body .cmd { color: var(--text); }
+  .term-body .path { color: var(--info); }
+  .term-body .dim { color: var(--faint); }
+  .sev { display: inline-block; min-width: 68px; font-weight: 700; }
+  .sev.e { color: var(--error); }
+  .sev.w { color: var(--warning); }
+  .sev.i { color: var(--info); }
+  .rid { color: var(--muted); }
+  .cur { display:inline-block; width:8px; height:15px; background: var(--accent); vertical-align:-2px; margin-left:2px; }
+  .score-line { color: var(--text); }
+  .score-line .n { color: var(--accent); font-weight: 700; }
+  /* terminal line-streaming (motion only; static + visible otherwise) */
+  @media (prefers-reduced-motion: no-preference) {
+    /* looping hero terminal: lines are hidden until JS reveals them one by one */
+    .term.loop .term-body .ln { opacity: 0; transform: translateY(3px); transition: opacity .28s var(--ease), transform .28s var(--ease); }
+    .term.loop .term-body .ln.vis { opacity: 1; transform: none; }
+    .term.loop .term-body .cur { display: none; }
+    .term.loop .term-body .ln.typing .cmd::after {
+      content: ""; display: inline-block; width: 8px; height: 15px; background: var(--accent);
+      vertical-align: -2px; margin-left: 1px; animation: curBlink 1.05s steps(1, end) infinite;
+    }
+    .term-body .scan-line { color: var(--faint); }
+    .term-body .scan-line .spin { color: var(--accent); }
+    .cur { animation: curBlink 1.05s steps(1, end) infinite; }
+    @keyframes curBlink { 50% { opacity: 0; } }
+  }
+  /* pipeline connectors: subtle flow of data between stages (motion only) */
+  @media (prefers-reduced-motion: no-preference) {
+    .pipe-svg.run .eflow { stroke-dasharray: 5 6; animation: edgeFlow .9s linear infinite; }
+    @keyframes edgeFlow { to { stroke-dashoffset: -11; } }
+  }
+
+  /* ----- section scaffolding ----- */
+  section { padding: 84px 0; }
+  [id] { scroll-margin-top: 88px; }
+  .sec-head { max-width: 62ch; margin-bottom: 44px; }
+  .sec-head h2 { font-size: clamp(1.7rem, 3.4vw, 2.5rem); }
+  .sec-head p { margin-top: 16px; color: var(--muted); font-size: 17px; }
+
+  /* ----- targets strip ----- */
+  .targets { padding-top: 26px; }
+  .targets .cap { text-align: center; color: var(--faint); font-family: var(--mono); font-size: 12.5px; letter-spacing: .12em; text-transform: uppercase; margin-bottom: 30px; }
+  .logo-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 14px; }
+  .logo-cell { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 22px 10px; border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); transition: border-color .2s var(--ease), transform .2s var(--ease); }
+  .logo-cell:hover { border-color: var(--border-2); transform: translateY(-2px); }
+  .logo-cell img { height: 30px; width: 30px; opacity: .82; }
+  .logo-cell span { font-size: 11.5px; color: var(--faint); font-family: var(--mono); letter-spacing: .02em; }
+  @media (max-width: 920px) { .logo-grid { grid-template-columns: repeat(4, 1fr); } }
+  @media (max-width: 480px) { .logo-grid { grid-template-columns: repeat(2, 1fr); } }
+
+  /* ----- pipeline diagram ----- */
+  .pipe-wrap { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); padding: 10px; }
+  .pipe-svg { display: block; width: 100%; height: auto; }
+  .pipe-legend { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px 30px; margin-top: 26px; }
+  .pipe-legend div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .pipe-legend b { font-family: "Space Grotesk", sans-serif; color: var(--text); font-weight: 600; font-size: 14px; }
+  .pipe-legend span { color: var(--muted); font-size: 14px; line-height: 1.55; }
+  @media (max-width: 760px) { .pipe-legend { grid-template-columns: 1fr; gap: 18px; } }
+
+  /* ----- bento ----- */
+  .bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
+  .cell { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); padding: 26px; display: flex; flex-direction: column; min-width: 0; }
+  .cell h3 { font-size: 1.15rem; margin-bottom: 10px; }
+  .cell p { color: var(--muted); font-size: 14.5px; }
+  .cell.span4 { grid-column: span 4; }
+  .cell.span3 { grid-column: span 3; }
+  .cell.span2 { grid-column: span 2; }
+  .cell.tint { background: linear-gradient(160deg, rgba(94,196,110,.09), rgba(94,196,110,0) 60%), var(--panel); border-color: var(--accent-dim); }
+  .cell .code { margin-top: 16px; background: #0e0e0d; border: 1px solid var(--border); border-radius: 10px; padding: 14px; font-family: var(--mono); font-size: 12.5px; line-height: 1.75; color: var(--muted); overflow-x: auto; }
+  .cell .code .k { color: var(--accent); }
+  .cell .code .s { color: var(--info); }
+  @media (max-width: 920px) {
+    .bento { grid-template-columns: repeat(2, 1fr); }
+    .cell.span4, .cell.span3, .cell.span2 { grid-column: span 2; }
+  }
+  @media (max-width: 560px) {
+    .bento { grid-template-columns: 1fr; }
+    .cell.span4, .cell.span3, .cell.span2 { grid-column: span 1; }
+  }
+
+  /* score ring */
+  .ring-wrap { display: flex; align-items: center; gap: 22px; margin-top: 20px; }
+  .ring { position: relative; width: 112px; height: 112px; flex: none; }
+  .ring svg { transform: rotate(-90deg); }
+  .ring .val { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+  .ring .val b { font-family: "Space Grotesk", sans-serif; font-size: 30px; color: var(--accent); line-height: 1; }
+  .ring .val small { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 3px; }
+  .deduct { display: grid; gap: 7px; font-family: var(--mono); font-size: 13px; }
+  .deduct div { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+  .deduct .tag { min-width: 58px; font-weight: 700; }
+  .deduct .tag.e { color: var(--error); } .deduct .tag.w { color: var(--warning); } .deduct .tag.i { color: var(--info); }
+
+  .fmt-chips { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 18px; }
+  .chip { font-family: var(--mono); font-size: 12.5px; padding: 6px 12px; border-radius: var(--r-pill); border: 1px solid var(--border-2); color: var(--muted); }
+  .chip.on { border-color: var(--accent-dim); color: var(--accent); background: rgba(94,196,110,.07); }
+
+  .mini-logos { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 20px; align-items: center; }
+  .mini-logos img { height: 24px; width: 24px; opacity: .72; }
+
+  /* ----- rule -> finding ----- */
+  .rf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: stretch; }
+  .rf-grid .flow { position: absolute; }
+  .codeblock { background: #0e0e0d; border: 1px solid var(--border-2); border-radius: var(--r-card); overflow: hidden; display: flex; flex-direction: column; }
+  .codeblock .cb-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 15px; border-bottom: 1px solid var(--border); background: #151413; }
+  .codeblock .cb-head .name { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+  .codeblock .cb-head .tag { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .codeblock pre { margin: 0; padding: 16px 18px; font-family: var(--mono); font-size: 12.8px; line-height: 1.8; overflow-x: auto; color: #d7d7d2; }
+  .codeblock pre .k { color: var(--accent); }
+  .codeblock pre .s { color: var(--info); }
+  .codeblock pre .c { color: var(--faint); }
+  .codeblock pre .n { color: var(--warning); }
+  .finding-card { background: var(--panel); border: 1px solid var(--border-2); border-radius: var(--r-card); padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+  .finding-card .row { display: grid; grid-template-columns: auto 1fr; gap: 6px 13px; }
+  .badge { font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 3px 9px; border-radius: 5px; height: fit-content; }
+  .badge.e { color: var(--error); background: var(--error-bg); }
+  .finding-card .msg { font-size: 15px; color: var(--text); }
+  .finding-card .loc { grid-column: 2; font-family: var(--mono); font-size: 12.5px; color: var(--faint); }
+  .finding-card .rem { border-top: 1px solid var(--border); padding-top: 13px; font-size: 13.5px; color: var(--muted); }
+  .finding-card .rem b { color: var(--text); font-weight: 600; display: block; margin-bottom: 4px; font-family: "Space Grotesk", sans-serif; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+  .finding-card .rem code { font-family: var(--mono); color: var(--accent); font-size: 13px; }
+  @media (max-width: 820px) { .rf-grid { grid-template-columns: 1fr; } }
+
+  /* ----- CI block ----- */
+  .ci-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+  .ci-list { display: grid; gap: 20px; }
+  .ci-item { display: grid; grid-template-columns: auto 1fr; gap: 16px; }
+  .ci-item .ic { width: 38px; height: 38px; border-radius: 10px; border: 1px solid var(--border-2); display: flex; align-items: center; justify-content: center; color: var(--accent); flex: none; }
+  .ci-item .ic svg { width: 19px; height: 19px; }
+  .ci-item h3 { font-size: 1.05rem; margin-bottom: 4px; }
+  .ci-item p { color: var(--muted); font-size: 14.5px; }
+  @media (max-width: 820px) { .ci-grid { grid-template-columns: 1fr; gap: 28px; } }
+
+  /* ----- final CTA ----- */
+  .cta { text-align: center; }
+  .cta-box { border: 1px solid var(--border-2); border-radius: 20px; background: linear-gradient(180deg, var(--panel-2), var(--panel)); padding: 56px 32px; }
+  .cta-box h2 { font-size: clamp(1.9rem, 4vw, 2.7rem); }
+  .cta-box p { color: var(--muted); font-size: 17px; margin: 16px auto 0; max-width: 52ch; }
+  .install { display: inline-flex; align-items: center; gap: 14px; margin: 30px auto 0; background: #0e0e0d; border: 1px solid var(--border-2); border-radius: var(--r-btn); padding: 12px 10px 12px 18px; font-family: var(--mono); font-size: 14px; color: var(--text); max-width: 100%; overflow-x: auto; }
+  .install .pr { color: var(--accent); }
+  .install .cp { flex: none; border: 1px solid var(--border-2); background: var(--panel-2); color: var(--muted); border-radius: 7px; padding: 6px 11px; font-family: "Space Grotesk", sans-serif; font-size: 12px; cursor: pointer; transition: color .15s, border-color .15s; }
+  .install .cp:hover { color: var(--accent); border-color: var(--accent-dim); }
+  .cta-sub { margin-top: 20px; color: var(--faint); font-family: var(--mono); font-size: 13px; }
+  .cta-actions { display: flex; gap: 14px; justify-content: center; margin-top: 26px; flex-wrap: wrap; }
+
+  /* live project stats (real GitHub data, zero-values auto-hidden) */
+  .stats-strip { display: flex; justify-content: center; flex-wrap: wrap; gap: 14px; margin: 30px auto 0; max-width: 560px; }
+  .stats-strip.ready { animation: statsIn .6s var(--ease) both; }
+  @media (prefers-reduced-motion: reduce) { .stats-strip.ready { animation: none; } }
+  @keyframes statsIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .stat-tile { flex: 1 1 140px; min-width: 130px; border: 1px solid var(--border-2); border-radius: var(--r-card); background: rgba(14,14,13,.6); padding: 16px 18px; text-align: left; }
+  .stat-tile .v { font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 26px; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1; }
+  .stat-tile .v .accent { color: var(--accent); }
+  .stat-tile .l { margin-top: 7px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
+  .nav-right .gh .cnt { color: var(--text); font-weight: 600; }
+  .stats-note { margin: 12px auto 0; color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
+
+  /* ----- footer ----- */
+  footer { border-top: 1px solid var(--border); padding: 48px 0 56px; }
+  .foot-grid { display: flex; justify-content: space-between; gap: 40px; flex-wrap: wrap; }
+  .foot-brand { max-width: 34ch; }
+  .foot-brand p { color: var(--muted); font-size: 14px; margin-top: 14px; }
+  .foot-cols { display: flex; gap: 64px; flex-wrap: wrap; }
+  .foot-col h4 { font-family: "Space Grotesk", sans-serif; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
+  .foot-col a { display: block; color: var(--muted); font-size: 14px; padding: 4px 0; transition: color .15s; }
+  .foot-col a:hover { color: var(--text); }
+  .foot-base { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; color: var(--faint); font-family: var(--mono); font-size: 12.5px; }
+
+  /* ----- documentation ----- */
+  .quickstart { display: grid; grid-template-columns: repeat(3, 1fr); border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); overflow: hidden; margin-bottom: 40px; }
+  .qs { padding: 22px 24px; border-left: 1px solid var(--border); }
+  .qs:first-child { border-left: 0; }
+  .qs h3 { font-size: 1.02rem; margin-bottom: 8px; }
+  .qs h3 .o { color: var(--accent); font-family: var(--mono); font-weight: 700; margin-right: 9px; }
+  .qs p { color: var(--muted); font-size: 13.5px; margin-bottom: 14px; }
+  .qs code { display: block; background: #0e0e0d; border: 1px solid var(--border); border-radius: 9px; padding: 11px 13px; font-family: var(--mono); font-size: 12.3px; color: var(--text); overflow-x: auto; white-space: pre; }
+  .qs code .pr { color: var(--accent); }
+  @media (max-width: 820px) { .quickstart { grid-template-columns: 1fr; } .qs { border-left: 0; border-top: 1px solid var(--border); } .qs:first-child { border-top: 0; } }
+
+  .docs-panel { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--panel); overflow: hidden; }
+  .palette-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 24px; border-bottom: 1px solid var(--border); background: var(--bg-2); }
+  .palette-head .fh { font-family: "Space Grotesk", sans-serif; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+  .ref-link { font-family: var(--mono); font-size: 13px; color: var(--accent); transition: color .15s; }
+  .ref-link:hover { color: var(--text); }
+  .cmd-list { display: grid; }
+  .cmd-row { display: grid; grid-template-columns: minmax(0, 270px) 1fr; gap: 10px 28px; align-items: baseline; padding: 18px 24px; border-top: 1px solid var(--border); }
+  .cmd-row:first-child { border-top: 0; }
+  .cmd-head { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .cmd-row .name { font-family: var(--mono); font-size: 15px; font-weight: 700; color: var(--accent); }
+  .cmd-row .sig { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+  .cmd-row p { color: var(--muted); font-size: 14px; }
+  @media (max-width: 640px) { .cmd-row { grid-template-columns: 1fr; gap: 6px; } }
+  .global-flags { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; color: var(--faint); font-size: 13px; }
+  .global-flags b { font-family: "Space Grotesk", sans-serif; color: var(--muted); font-size: 12px; letter-spacing: .04em; text-transform: uppercase; }
+  .global-flags code { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
+
+  /* ----- reveal motion (opt-in via .js, reduced-motion safe) ----- */
+  @media (prefers-reduced-motion: no-preference) {
+    .js .reveal { opacity: 0; transform: translateY(22px); transition: opacity .7s var(--ease), transform .7s var(--ease); }
+    .js .reveal.in { opacity: 1; transform: none; }
+  }
+</style>
+</head>
+<body>
+<script>document.documentElement.classList.add('js');</script>
+<a class="skip-link" href="#top">Skip to content</a>
+
+<!-- ============ NAV ============ -->
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="StackGuard home" translate="no">
+      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M16 2.5 28 7v8.4c0 7.3-4.9 12.4-12 14.1C8.9 27.8 4 22.7 4 15.4V7L16 2.5Z" fill="rgba(94,196,110,.12)" stroke="#5ec46e" stroke-width="1.7" stroke-linejoin="round"/>
+        <path d="M10.5 16.2l3.8 3.8 7-7.6" stroke="#5ec46e" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      StackGuard
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#targets">Targets</a>
+      <a href="#how">How it works</a>
+      <a href="#rules">Rules</a>
+      <a href="#ci">CI</a>
+      <a href="docs.html">Docs</a>
+    </nav>
+    <div class="nav-right">
+      <a class="gh" href="https://github.com/nexutils/StackGuard" aria-label="StackGuard on GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.53.1.72-.23.72-.5v-1.76c-2.93.64-3.55-1.41-3.55-1.41-.48-1.22-1.17-1.54-1.17-1.54-.96-.66.07-.64.07-.64 1.06.07 1.62 1.09 1.62 1.09.94 1.62 2.47 1.15 3.07.88.1-.68.37-1.15.67-1.41-2.34-.27-4.8-1.17-4.8-5.2 0-1.15.41-2.09 1.08-2.83-.11-.27-.47-1.34.1-2.8 0 0 .88-.28 2.88 1.08a9.9 9.9 0 0 1 5.24 0c2-1.36 2.88-1.08 2.88-1.08.57 1.46.21 2.53.1 2.8.67.74 1.08 1.68 1.08 2.83 0 4.04-2.47 4.93-4.82 5.19.38.33.72.97.72 1.96v2.9c0 .28.19.61.73.5A10.5 10.5 0 0 0 12 1.5Z"/></svg>
+        Star<span class="cnt" id="navStars"></span>
+      </a>
+      <a class="btn btn-primary btn-sm" href="#get-started">Get started</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" aria-labelledby="hero-h">
+    <div class="wrap">
+      <div class="hero-grid">
+        <div>
+          <h1 id="hero-h">Catch infrastructure risks <span class="hl">before</span> they reach production.</h1>
+          <p class="lede">StackGuard scans Terraform, Kubernetes, Helm, Docker and CI pipelines against policy as code, then scores every result.</p>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="#get-started">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+              Get started
+            </a>
+            <a class="btn btn-ghost" href="https://github.com/nexutils/StackGuard">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.53.1.72-.23.72-.5v-1.76c-2.93.64-3.55-1.41-3.55-1.41-.48-1.22-1.17-1.54-1.17-1.54-.96-.66.07-.64.07-.64 1.06.07 1.62 1.09 1.62 1.09.94 1.62 2.47 1.15 3.07.88.1-.68.37-1.15.67-1.41-2.34-.27-4.8-1.17-4.8-5.2 0-1.15.41-2.09 1.08-2.83-.11-.27-.47-1.34.1-2.8 0 0 .88-.28 2.88 1.08a9.9 9.9 0 0 1 5.24 0c2-1.36 2.88-1.08 2.88-1.08.57 1.46.21 2.53.1 2.8.67.74 1.08 1.68 1.08 2.83 0 4.04-2.47 4.93-4.82 5.19.38.33.72.97.72 1.96v2.9c0 .28.19.61.73.5A10.5 10.5 0 0 0 12 1.5Z"/></svg>
+              View on GitHub
+            </a>
+          </div>
+        </div>
+
+        <!-- real CLI output: a terminal is the actual interface of a CLI -->
+        <div class="term" translate="no" role="img" aria-label="Terminal running stackguard scan, showing one error, three warnings, and a score of 81 out of 100">
+          <div class="term-bar">
+            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            <span class="ttl">stackguard scan .</span>
+            <span class="sp" aria-hidden="true"></span>
+            <button class="term-pause" id="termPause" type="button" aria-label="Pause the demo" hidden><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg></button>
+          </div>
+          <div class="term-body" aria-hidden="true">
+<div class="ln" style="--i:0"><span class="prompt">$</span> <span class="cmd">stackguard scan .</span></div>
+<div class="ln" style="--i:1"> </div>
+<div class="ln" style="--i:2"><span class="sev e">ERROR</span>  <span class="rid">TF_SEC_001</span>  <span class="path">prod/s3.tf:12</span></div>
+<div class="ln" style="--i:3">        bucket "assets" grants a public ACL (public-read)</div>
+<div class="ln" style="--i:4"><span class="sev w">WARNING</span><span class="rid">K8S_OPS_001</span> <span class="path">k8s/api.yaml:23</span></div>
+<div class="ln" style="--i:5">        Deployment "api" has no resource requests or limits</div>
+<div class="ln" style="--i:6"><span class="sev w">WARNING</span><span class="rid">TF_REL_001</span>  <span class="path">prod/rds.tf:8</span></div>
+<div class="ln" style="--i:7">        rds "orders" does not enable deletion protection</div>
+<div class="ln" style="--i:8"><span class="sev w">WARNING</span><span class="rid">K8S_MNT_001</span> <span class="path">k8s/api.yaml:31</span></div>
+<div class="ln" style="--i:9">        container "api" uses an unpinned image (nginx:latest)</div>
+<div class="ln" style="--i:10"> </div>
+<div class="ln score-line" style="--i:11">Score <span class="n">81/100</span>   1 error, 3 warnings</div>
+<div class="ln" style="--i:12"><span class="dim">exit status 1  (--fail-on error)</span><span class="cur"></span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- fact band: moved out of the hero so the hero is headline + subtext + CTAs only -->
+  <section class="factbar" aria-label="At a glance">
+    <div class="wrap">
+      <span><b>Single Go binary</b>, no daemon</span>
+      <span><b>Apache 2.0</b> licensed</span>
+      <span>Console, JSON, <b>SARIF</b>, HTML</span>
+    </div>
+  </section>
+
+  <!-- ============ TARGETS ============ -->
+  <section class="targets reveal" id="targets" aria-labelledby="targets-cap">
+    <div class="wrap">
+      <p class="cap" id="targets-cap">One scanner for the whole stack</p>
+      <div class="logo-grid">
+        <div class="logo-cell"><img src="https://cdn.simpleicons.org/terraform/9b9b93" alt="Terraform" width="30" height="30" loading="lazy"><span>Terraform</span></div>
+        <div class="logo-cell"><img src="https://cdn.simpleicons.org/kubernetes/9b9b93" alt="Kubernetes" width="30" height="30" loading="lazy"><span>Kubernetes</span></div>
+        <div class="logo-cell"><img src="https://cdn.simpleicons.org/helm/9b9b93" alt="Helm" width="30" height="30" loading="lazy"><span>Helm</span></div>
+        <div class="logo-cell"><img src="https://cdn.simpleicons.org/docker/9b9b93" alt="Docker and Compose" width="30" height="30" loading="lazy"><span>Docker</span></div>
+        <div class="logo-cell"><img src="https://cdn.simpleicons.org/githubactions/9b9b93" alt="GitHub Actions" width="30" height="30" loading="lazy"><span>Actions</span></div>
+        <div class="logo-cell"><img src="https://cdn.simpleicons.org/jenkins/9b9b93" alt="Jenkins" width="30" height="30" loading="lazy"><span>Jenkins</span></div>
+        <div class="logo-cell"><img src="https://cdn.simpleicons.org/ansible/9b9b93" alt="Ansible" width="30" height="30" loading="lazy"><span>Ansible</span></div>
+        <div class="logo-cell"><img src="https://cdn.simpleicons.org/nginx/9b9b93" alt="nginx" width="30" height="30" loading="lazy"><span>nginx</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ HOW IT WORKS (pipeline diagram) ============ -->
+  <section id="how" aria-labelledby="how-h">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <h2 id="how-h">A single pass turns files into findings.</h2>
+        <p>Every file becomes a normalized resource, every rule is compiled once, and positions travel with the data so each finding points at the exact line.</p>
+      </div>
+
+      <div class="pipe-wrap reveal">
+        <svg class="pipe-svg" viewBox="0 0 1120 300" role="img" aria-label="StackGuard pipeline: the CLI discovers files, parsers turn them into resources, the engine evaluates compiled rules, and reporters emit findings.">
+          <defs>
+            <marker id="arw" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0L10 5L0 10z" fill="#4a4944"/>
+            </marker>
+            <style>
+              .stage { fill: #1c1c1a; stroke: #3b3a36; }
+              .stage-t { fill: #ededea; font: 600 17px "Space Grotesk", sans-serif; }
+              .flow-l { fill: #6f6f68; font: 500 12px "JetBrains Mono", monospace; letter-spacing: .04em; }
+              .edge { stroke: #4a4944; stroke-width: 1.6; }
+              .feed { fill: #a0a099; font: 500 11.5px "JetBrains Mono", monospace; }
+            </style>
+          </defs>
+
+          <!-- stage boxes -->
+          <g>
+            <rect class="stage" x="20"  y="92" width="140" height="64" rx="12"/>
+            <text class="stage-t" x="90" y="130" text-anchor="middle">CLI</text>
+            <rect class="stage" x="255" y="92" width="140" height="64" rx="12"/>
+            <text class="stage-t" x="325" y="130" text-anchor="middle">Discovery</text>
+            <rect class="stage" x="490" y="92" width="140" height="64" rx="12"/>
+            <text class="stage-t" x="560" y="130" text-anchor="middle">Parsers</text>
+            <rect class="stage" x="725" y="92" width="140" height="64" rx="12" style="stroke:#3f7f49;fill:#182018;"/>
+            <text class="stage-t" x="795" y="130" text-anchor="middle" style="fill:#5ec46e;">Engine</text>
+            <rect class="stage" x="960" y="92" width="140" height="64" rx="12"/>
+            <text class="stage-t" x="1030" y="130" text-anchor="middle">Reporters</text>
+          </g>
+
+          <!-- edges + flow labels -->
+          <g>
+            <line class="edge eflow" x1="160" y1="124" x2="255" y2="124" marker-end="url(#arw)"/>
+            <text class="flow-l" x="207" y="114" text-anchor="middle">paths</text>
+            <line class="edge eflow" x1="395" y1="124" x2="490" y2="124" marker-end="url(#arw)"/>
+            <text class="flow-l" x="442" y="114" text-anchor="middle">files</text>
+            <line class="edge eflow" x1="630" y1="124" x2="725" y2="124" marker-end="url(#arw)"/>
+            <text class="flow-l" x="677" y="114" text-anchor="middle">resources</text>
+            <line class="edge eflow" x1="865" y1="124" x2="960" y2="124" marker-end="url(#arw)"/>
+            <text class="flow-l" x="912" y="114" text-anchor="middle">findings</text>
+          </g>
+
+          <!-- loader compiles embedded + local rules and feeds them to the engine -->
+          <g>
+            <rect class="stage" x="648" y="224" width="294" height="48" rx="12"/>
+            <text x="795" y="253" text-anchor="middle" class="feed">loader: embedded rules + local layers</text>
+            <path class="edge eflow" d="M795 224 L795 158" marker-end="url(#arw)" fill="none"/>
+            <text class="flow-l" x="812" y="196" text-anchor="start">compiled rules</text>
+          </g>
+        </svg>
+      </div>
+
+      <div class="pipe-legend reveal">
+        <div><b>Everything is a Resource.</b><span>Parsers emit a target, type, name and generic property tree. Rules never touch raw text.</span></div>
+        <div><b>Compiled once.</b><span>Queries and regexes compile before any file is read. Evaluation is pure in-memory traversal.</span></div>
+        <div><b>Failures are contained.</b><span>A file that will not parse becomes a diagnostic, not a crash. One bad file never hides the rest.</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BENTO FEATURES ============ -->
+  <section aria-labelledby="feat-h">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <h2 id="feat-h">Policy as code, built for the people who run production.</h2>
+        <p>No plugin SDK and no embedded scripting language. Rules are YAML, results are a number your pipeline can gate on.</p>
+      </div>
+
+      <div class="bento">
+        <!-- A: policy as code (big, with real rule) -->
+        <article class="cell span4 tint reveal">
+          <h3>Write a rule without writing Go</h3>
+          <p>A rule names the resources it applies to and describes the bad condition as a query. Drop the file in a rules directory and it loads on the next scan.</p>
+          <div class="code">
+<span class="k">id</span>: TF_SEC_002
+<span class="k">title</span>: SSH open to the internet
+<span class="k">severity</span>: ERROR
+<span class="k">target</span>: terraform
+<span class="k">query</span>:
+  <span class="k">path</span>: ingress.*.cidr_blocks
+  <span class="k">contains</span>: <span class="s">"0.0.0.0/0"</span>
+          </div>
+        </article>
+
+        <!-- B: score -->
+        <article class="cell span2 reveal">
+          <h3>A score, not a wall of text</h3>
+          <div class="ring-wrap">
+            <div class="ring">
+              <svg width="112" height="112" viewBox="0 0 112 112" aria-hidden="true">
+                <circle cx="56" cy="56" r="48" fill="none" stroke="#302f2c" stroke-width="10"/>
+                <circle cx="56" cy="56" r="48" fill="none" stroke="#5ec46e" stroke-width="10" stroke-linecap="round" stroke-dasharray="301.6" stroke-dashoffset="57.3"/>
+              </svg>
+              <div class="val"><b>81</b><small>/ 100</small></div>
+            </div>
+            <div class="deduct">
+              <div><span class="tag e">-10</span> per error</div>
+              <div><span class="tag w">-3</span> per warning</div>
+              <div><span class="tag i">-1</span> per info</div>
+            </div>
+          </div>
+        </article>
+
+        <!-- C: targets mini -->
+        <article class="cell span2 reveal">
+          <h3>Nine targets, one tool</h3>
+          <p>Compose, Dockerfile, Kubernetes, Helm, Terraform, Actions, Jenkins, Ansible and nginx.</p>
+          <div class="mini-logos">
+            <img src="https://cdn.simpleicons.org/terraform/7a7a72" alt="Terraform" width="24" height="24" loading="lazy">
+            <img src="https://cdn.simpleicons.org/kubernetes/7a7a72" alt="Kubernetes" width="24" height="24" loading="lazy">
+            <img src="https://cdn.simpleicons.org/docker/7a7a72" alt="Docker" width="24" height="24" loading="lazy">
+            <img src="https://cdn.simpleicons.org/helm/7a7a72" alt="Helm" width="24" height="24" loading="lazy">
+            <img src="https://cdn.simpleicons.org/githubactions/7a7a72" alt="GitHub Actions" width="24" height="24" loading="lazy">
+            <img src="https://cdn.simpleicons.org/nginx/7a7a72" alt="nginx" width="24" height="24" loading="lazy">
+          </div>
+        </article>
+
+        <!-- D: CI gating -->
+        <article class="cell span2 reveal">
+          <h3>Fails the build on your terms</h3>
+          <p>Gate on severity, gate on score, or both. The exit code does the rest.</p>
+          <div class="code"><span class="k">scan</span> . --fail-on <span class="s">error</span> \
+     --min-score <span class="s">80</span></div>
+        </article>
+
+        <!-- E: formats -->
+        <article class="cell span2 reveal">
+          <h3>Report where you already look</h3>
+          <p>Human output for the terminal, SARIF for code scanning, JSON for everything else.</p>
+          <div class="fmt-chips">
+            <span class="chip on">console</span>
+            <span class="chip">json</span>
+            <span class="chip on">sarif</span>
+            <span class="chip">html</span>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ RULE -> FINDING ============ -->
+  <section id="rules" aria-labelledby="rules-h">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <p class="eyebrow">Rules</p>
+        <h2 id="rules-h">A rule on the left. The finding it produces on the right.</h2>
+        <p>Rules carry the message, the reason and the fix, so the output explains itself and tells the reader what to do next.</p>
+      </div>
+
+      <div class="rf-grid reveal">
+        <div class="codeblock">
+          <div class="cb-head"><span class="name">rules/terraform/TF_SEC_001.yaml</span><span class="tag">policy</span></div>
+<pre translate="no"><span class="k">id</span>: TF_SEC_001
+<span class="k">title</span>: Public S3 bucket ACL
+<span class="k">severity</span>: ERROR
+<span class="k">category</span>: security
+<span class="k">target</span>: terraform
+<span class="k">resource</span>: [resource.aws_s3_bucket, resource.aws_s3_bucket_acl]
+<span class="k">message</span>: <span class="s">"{{ .Resource.Name }} grants a public ACL ({{ .Value }})"</span>
+<span class="k">remediation</span>: |
+  Use <span class="s">acl = "private"</span> and enable
+  aws_s3_bucket_public_access_block.
+<span class="k">query</span>:
+  <span class="k">path</span>: acl
+  <span class="k">regex</span>: <span class="s">'^(public-read|public-read-write|authenticated-read)$'</span></pre>
+        </div>
+
+        <div class="finding-card">
+          <div class="row">
+            <span class="badge e">ERROR</span>
+            <span class="msg">assets grants a public ACL (public-read)</span>
+            <span class="loc">TF_SEC_001   prod/s3.tf:12   aws_s3_bucket.assets</span>
+          </div>
+          <div class="rem">
+            <b>Remediation</b>
+            Use <code>acl = "private"</code> and enable <code>aws_s3_bucket_public_access_block</code>.
+          </div>
+          <div class="rem" style="border:0;padding:0;">
+            <b>Run</b>
+            <span style="font-family:var(--mono);font-size:13px;color:var(--muted);">stackguard explain TF_SEC_001</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CI ============ -->
+  <section id="ci" aria-labelledby="ci-h">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <h2 id="ci-h">Wire it into the pipeline you already have.</h2>
+        <p>One step scans, gates and uploads to GitHub code scanning. No service to run and nothing to host.</p>
+      </div>
+
+      <div class="ci-grid">
+        <div class="codeblock reveal">
+          <div class="cb-head"><span class="name">.github/workflows/stackguard.yml</span><span class="tag">ci</span></div>
+<pre translate="no"><span class="c"># fail the PR on errors, and on a score under 80</span>
+- <span class="k">name</span>: StackGuard
+  <span class="k">run</span>: >
+    stackguard scan .
+    --fail-on error --min-score <span class="n">80</span>
+    --format sarif --output stackguard.sarif
+
+- <span class="k">uses</span>: github/codeql-action/upload-sarif@v3
+  <span class="k">with</span>:
+    <span class="k">sarif_file</span>: stackguard.sarif</pre>
+        </div>
+
+        <div class="ci-list reveal">
+          <div class="ci-item">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <div><h3>Exit codes that mean something</h3><p>Code 1 when a finding reaches your severity floor, or when the score drops below <code class="mono" style="color:var(--accent)">min_score</code>.</p></div>
+          </div>
+          <div class="ci-item">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M4 12h10M4 17h7"/></svg></span>
+            <div><h3>Findings land in the PR</h3><p>SARIF annotations point at the exact line, so reviewers see the issue in the diff instead of a log.</p></div>
+          </div>
+          <div class="ci-item">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 3v4M15 3v4M4 9h16M6 7h12v12a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2Z"/></svg></span>
+            <div><h3>Silence noise with a reason</h3><p>An inline <code class="mono" style="color:var(--accent)">stackguard:ignore</code> comment suppresses a rule and the count shows up in the report.</p></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ DOCUMENTATION ============ -->
+  <section id="docs" aria-labelledby="docs-h">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <h2 id="docs-h">Everything runs through one command.</h2>
+        <p>Install the binary, scan a path, and reach for the sub-commands when you need them. Five commands cover the whole surface. The full reference lives in the docs.</p>
+      </div>
+
+      <!-- quickstart -->
+      <div class="quickstart reveal">
+        <div class="qs">
+          <h3><span class="o">1</span>Install</h3>
+          <p>A single static binary. No runtime and no daemon.</p>
+          <code><span class="pr">$</span> go install \
+  github.com/nexutils/StackGuard/cmd/stackguard@latest</code>
+        </div>
+        <div class="qs">
+          <h3><span class="o">2</span>Scan a directory</h3>
+          <p>Point it at your repo. It detects every target it knows.</p>
+          <code><span class="pr">$</span> stackguard scan .</code>
+        </div>
+        <div class="qs">
+          <h3><span class="o">3</span>Gate in CI</h3>
+          <p>Fail on errors, or on a score below your threshold.</p>
+          <code><span class="pr">$</span> stackguard scan . \
+  --fail-on error --min-score 80</code>
+        </div>
+      </div>
+
+      <!-- command palette: compact overview, full reference lives in the docs -->
+      <div class="docs-panel reveal">
+        <div class="palette-head">
+          <span class="fh">Commands</span>
+          <a class="ref-link" href="docs.html">Full command reference &rarr;</a>
+        </div>
+        <div class="cmd-list">
+          <div class="cmd-row">
+            <div class="cmd-head"><span class="name">scan</span><span class="sig">stackguard scan [path...]</span></div>
+            <p>Scan files or directories for issues and emit a report.</p>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-head"><span class="name">score</span><span class="sig">stackguard score [path...]</span></div>
+            <p>Print the production-readiness score, and nothing else.</p>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-head"><span class="name">rules</span><span class="sig">stackguard rules</span></div>
+            <p>List the available rules, or validate a rule directory.</p>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-head"><span class="name">explain</span><span class="sig">stackguard explain RULE_ID</span></div>
+            <p>Show the details, reason and remediation for one rule.</p>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-head"><span class="name">version</span><span class="sig">stackguard version</span></div>
+            <p>Print the StackGuard version and build information.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="global-flags reveal">
+        <b>On every command</b>
+        <code>--config</code>
+        <code>--log-level</code>
+        <code>-v, --verbose</code>
+        <code>--no-color</code>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GET STARTED / CTA ============ -->
+  <section class="cta" id="get-started" aria-labelledby="cta-h">
+    <div class="wrap">
+      <div class="cta-box reveal">
+        <h2 id="cta-h">Scan your stack in under a minute.</h2>
+        <p>Install the binary, point it at a directory, and read the score. Add the CI step once you trust the output.</p>
+        <div class="install">
+          <span><span class="pr">$</span> go install github.com/nexutils/StackGuard/cmd/stackguard@latest</span>
+          <button class="cp" id="copyBtn" type="button" aria-label="Copy install command">Copy</button>
+          <span id="copyStatus" role="status" aria-live="polite" class="sr-only"></span>
+        </div>
+        <p class="cta-sub">Then: stackguard scan .</p>
+
+        <!-- Live stats pulled from the GitHub API at runtime. Each tile stays hidden
+             until it has a real, non-zero value, so a young repo never shows a
+             discouraging "0". No numbers are hardcoded. -->
+        <div class="stats-strip" id="liveStats" hidden aria-label="Project activity">
+          <div class="stat-tile" data-stat="downloads" hidden>
+            <div class="v" data-val></div>
+            <div class="l">Total downloads</div>
+          </div>
+          <div class="stat-tile" data-stat="stars" hidden>
+            <div class="v" data-val></div>
+            <div class="l">GitHub stars</div>
+          </div>
+          <div class="stat-tile" data-stat="version" hidden>
+            <div class="v" data-val></div>
+            <div class="l">Latest release</div>
+          </div>
+        </div>
+        <p class="stats-note" id="statsNote" hidden>Sample data for preview. Live numbers load from GitHub once the repository is public.</p>
+
+        <div class="cta-actions">
+          <a class="btn btn-primary" href="https://github.com/nexutils/StackGuard">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.53.1.72-.23.72-.5v-1.76c-2.93.64-3.55-1.41-3.55-1.41-.48-1.22-1.17-1.54-1.17-1.54-.96-.66.07-.64.07-.64 1.06.07 1.62 1.09 1.62 1.09.94 1.62 2.47 1.15 3.07.88.1-.68.37-1.15.67-1.41-2.34-.27-4.8-1.17-4.8-5.2 0-1.15.41-2.09 1.08-2.83-.11-.27-.47-1.34.1-2.8 0 0 .88-.28 2.88 1.08a9.9 9.9 0 0 1 5.24 0c2-1.36 2.88-1.08 2.88-1.08.57 1.46.21 2.53.1 2.8.67.74 1.08 1.68 1.08 2.83 0 4.04-2.47 4.93-4.82 5.19.38.33.72.97.72 1.96v2.9c0 .28.19.61.73.5A10.5 10.5 0 0 0 12 1.5Z"/></svg>
+            Star on GitHub
+          </a>
+          <a class="btn btn-ghost" href="docs.html">Read the docs</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-brand">
+        <a class="brand" href="#top" translate="no">
+          <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path d="M16 2.5 28 7v8.4c0 7.3-4.9 12.4-12 14.1C8.9 27.8 4 22.7 4 15.4V7L16 2.5Z" fill="rgba(94,196,110,.12)" stroke="#5ec46e" stroke-width="1.7" stroke-linejoin="round"/>
+            <path d="M10.5 16.2l3.8 3.8 7-7.6" stroke="#5ec46e" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          StackGuard
+        </a>
+        <p>Production-readiness scanning for infrastructure and deployment configuration.</p>
+      </div>
+      <div class="foot-cols">
+        <div class="foot-col">
+          <h4>Product</h4>
+          <a href="#targets">Targets</a>
+          <a href="#how">How it works</a>
+          <a href="#rules">Rules</a>
+          <a href="#ci">CI</a>
+        </div>
+        <div class="foot-col">
+          <h4>Commands</h4>
+          <a href="#get-started" class="mono">scan</a>
+          <a href="#get-started" class="mono">score</a>
+          <a href="#get-started" class="mono">rules</a>
+          <a href="#get-started" class="mono">explain</a>
+        </div>
+        <div class="foot-col">
+          <h4>Project</h4>
+          <a href="https://github.com/nexutils/StackGuard">GitHub</a>
+          <a href="https://github.com/nexutils/StackGuard">Issues</a>
+          <a href="https://github.com/nexutils/StackGuard/blob/main/CONTRIBUTING.md">Contributing</a>
+          <a href="https://github.com/nexutils/StackGuard/blob/main/LICENSE">License</a>
+        </div>
+      </div>
+    </div>
+    <div class="foot-base">
+      <span>Apache 2.0 licensed. Built with Go.</span>
+      <span>github.com/nexutils/StackGuard</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  // Scroll reveal via IntersectionObserver (no scroll listeners), reduced-motion safe.
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var els = document.querySelectorAll(".reveal");
+    if (reduce || !("IntersectionObserver" in window)) {
+      els.forEach(function (el) { el.classList.add("in"); });
+    } else {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+        });
+      }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+      els.forEach(function (el) { io.observe(el); });
+    }
+  })();
+
+  // Pipeline connector flow: start when it scrolls into view (one-shot).
+  (function () {
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || !("IntersectionObserver" in window)) return;
+    var el = document.querySelector(".pipe-svg");
+    if (!el) return;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("run"); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.35 });
+    io.observe(el);
+  })();
+
+  // Looping hero terminal: type the command, scan, stream the findings, hold, repeat.
+  // Motion-gated AND visibility-gated. Under reduced motion or no JS the static
+  // output already in the markup is shown as-is (the role="img" fallback).
+  (function () {
+    var term = document.querySelector(".term");
+    if (!term) return;
+    var body = term.querySelector(".term-body");
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce || !("IntersectionObserver" in window) || !body) return;
+
+    var lines = Array.prototype.slice.call(body.querySelectorAll(".ln"));
+    if (lines.length < 2) return;
+    var cmdLine = lines[0];
+    var cmdEl = cmdLine.querySelector(".cmd");
+    var cmdText = (cmdEl ? cmdEl.textContent : "stackguard scan .").trim();
+    var outputLines = lines.slice(1);
+
+    var SPIN = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
+    var running = false, visible = false, token = 0, spinId = 0, scanEl = null;
+
+    function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+    function removeScan() {
+      if (spinId) { clearInterval(spinId); spinId = 0; }
+      if (scanEl && scanEl.parentNode) scanEl.parentNode.removeChild(scanEl);
+      scanEl = null;
+    }
+
+    function reset() {
+      removeScan();
+      cmdLine.classList.remove("typing", "vis");
+      outputLines.forEach(function (ln) { ln.classList.remove("vis"); });
+      if (cmdEl) cmdEl.textContent = "";
+    }
+
+    function type(myToken, i) {
+      if (myToken !== token) return Promise.resolve();
+      if (i >= cmdText.length) return Promise.resolve();
+      if (cmdEl) cmdEl.textContent += cmdText.charAt(i);
+      return sleep(45 + Math.random() * 35).then(function () { return type(myToken, i + 1); });
+    }
+
+    function cycle(myToken) {
+      reset();
+      cmdLine.classList.add("vis", "typing");
+      return sleep(520).then(function () {
+        return type(myToken, 0);
+      }).then(function () {
+        if (myToken !== token) return;
+        return sleep(420);
+      }).then(function () {
+        if (myToken !== token) return;
+        cmdLine.classList.remove("typing");
+        scanEl = document.createElement("div");
+        scanEl.className = "ln scan-line vis";
+        scanEl.innerHTML = '<span class="spin">' + SPIN[0] + '</span> scanning 42 files · evaluating rules…';
+        cmdLine.parentNode.insertBefore(scanEl, outputLines[0]);
+        var spinEl = scanEl.querySelector(".spin"), f = 0;
+        spinId = setInterval(function () { f = (f + 1) % SPIN.length; if (spinEl) spinEl.textContent = SPIN[f]; }, 80);
+        return sleep(1150);
+      }).then(function () {
+        if (myToken !== token) return;
+        removeScan();
+        return outputLines.reduce(function (p, ln) {
+          return p.then(function () {
+            if (myToken !== token) return;
+            ln.classList.add("vis");
+            return sleep(ln.textContent.trim() === "" ? 70 : 150);
+          });
+        }, Promise.resolve());
+      });
+    }
+
+    function loop(myToken) {
+      if (!running || myToken !== token) return;
+      cycle(myToken).then(function () {
+        if (!running || myToken !== token) return;
+        return sleep(3600);
+      }).then(function () {
+        loop(myToken);
+      });
+    }
+
+    function start() { if (running) return; running = true; token++; term.classList.add("loop"); reset(); loop(token); }
+    function stop() { running = false; token++; removeScan(); }
+
+    var userPaused = false;
+    var pauseBtn = document.getElementById("termPause");
+    var PAUSE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+    var PLAY_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
+
+    term.classList.add("loop");
+    reset();
+    if (pauseBtn) pauseBtn.hidden = false;
+
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { visible = e.isIntersecting; if (visible && !userPaused) start(); else stop(); });
+    }, { threshold: 0.35 });
+    io.observe(term);
+
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) stop(); else if (visible && !userPaused) start();
+    });
+
+    if (pauseBtn) {
+      pauseBtn.addEventListener("click", function () {
+        userPaused = !userPaused;
+        pauseBtn.innerHTML = userPaused ? PLAY_SVG : PAUSE_SVG;
+        pauseBtn.setAttribute("aria-label", userPaused ? "Play the demo" : "Pause the demo");
+        if (userPaused) stop(); else if (visible) start();
+      });
+    }
+  })();
+
+  // Command reference tabs (ARIA + arrow-key navigation)
+  (function () {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.tablist [role="tab"]'));
+    if (!tabs.length) return;
+    function select(tab) {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        t.tabIndex = on ? 0 : -1;
+        var panel = document.getElementById(t.getAttribute("aria-controls"));
+        if (panel) { panel.classList.toggle("show", on); panel.hidden = !on; }
+      });
+    }
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener("click", function () { select(tab); });
+      tab.addEventListener("keydown", function (e) {
+        var n = null;
+        if (e.key === "ArrowRight") n = tabs[(i + 1) % tabs.length];
+        else if (e.key === "ArrowLeft") n = tabs[(i - 1 + tabs.length) % tabs.length];
+        else if (e.key === "Home") n = tabs[0];
+        else if (e.key === "End") n = tabs[tabs.length - 1];
+        if (n) { e.preventDefault(); select(n); n.focus(); }
+      });
+    });
+  })();
+
+  // Live project stats from the GitHub API. Honest and self-updating:
+  // nothing is hardcoded, and any metric that is still zero stays hidden so a
+  // young repo never advertises a discouraging "0". Fails silent when offline
+  // or rate-limited (the strip simply never appears).
+  (function () {
+    var REPO = "nexutils/StackGuard";
+    // DEMO shows clearly-labeled sample values so the component is reviewable while
+    // the repo is still private / has no releases. It auto-enables only for local
+    // preview (file://, localhost, or the Lavish server). On the live GitHub Pages
+    // domain it is OFF, so production shows ONLY real GitHub numbers and hides any
+    // zero value. Nothing is ever hardcoded into the published numbers.
+    var h = location.hostname;
+    var DEMO = location.protocol === "file:" || h === "" || h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0";
+
+    var strip = document.getElementById("liveStats");
+    var note = document.getElementById("statsNote");
+    if (!strip || !window.fetch) return;
+    var fmt = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+    var shownReal = false;
+
+    function showTile(name, html) {
+      var tile = strip.querySelector('[data-stat="' + name + '"]');
+      if (!tile) return;
+      tile.querySelector("[data-val]").innerHTML = html;
+      tile.hidden = false;
+    }
+    function reveal() {
+      if (strip.querySelector(".stat-tile:not([hidden])")) { strip.hidden = false; strip.classList.add("ready"); }
+    }
+    function sampleFallback() {
+      if (shownReal || !DEMO) return;
+      showTile("downloads", '<span class="accent">12.4k</span>');
+      showTile("stars", "840");
+      showTile("version", "v0.3.0");
+      if (note) note.hidden = false;
+    }
+
+    var api = "https://api.github.com/repos/" + REPO;
+    Promise.allSettled([
+      fetch(api).then(function (r) { return r.ok ? r.json() : null; }),
+      fetch(api + "/releases?per_page=100").then(function (r) { return r.ok ? r.json() : null; })
+    ]).then(function (res) {
+      var repo = res[0].value, releases = res[1].value;
+
+      if (repo && repo.stargazers_count > 0) {
+        shownReal = true;
+        showTile("stars", fmt.format(repo.stargazers_count));
+        var nav = document.getElementById("navStars");
+        if (nav) nav.textContent = " " + fmt.format(repo.stargazers_count);
+      }
+      if (Array.isArray(releases)) {
+        var downloads = 0, latest = null;
+        releases.forEach(function (rel) {
+          if (!latest && !rel.prerelease && !rel.draft) latest = rel.tag_name;
+          (rel.assets || []).forEach(function (a) { downloads += a.download_count || 0; });
+        });
+        if (downloads > 0) { shownReal = true; showTile("downloads", '<span class="accent">' + fmt.format(downloads) + "</span>"); }
+        if (latest) { shownReal = true; showTile("version", latest); }
+      }
+      sampleFallback();
+      reveal();
+    }).catch(sampleFallback);
+  })();
+
+  // Copy install command
+  (function () {
+    var btn = document.getElementById("copyBtn");
+    if (!btn) return;
+    btn.addEventListener("click", function () {
+      var cmd = "go install github.com/nexutils/StackGuard/cmd/stackguard@latest";
+      var done = function () { btn.textContent = "Copied"; var s = document.getElementById("copyStatus"); if (s) s.textContent = "Install command copied to clipboard"; setTimeout(function () { btn.textContent = "Copy"; }, 1600); };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cmd).then(done).catch(done);
+      } else { done(); }
+    });
+  })();
+</script>
+</body>
+</html>
