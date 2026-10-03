@@ -247,6 +247,25 @@ func resolve(v any, segs []segment, prefix string, env Env, out *[]Match) {
 	s, rest := segs[0], segs[1:]
 	switch s.kind {
 	case segKey:
+		// A non-numeric key applied to a list applies to each element, so a path
+		// can read through single (or repeated) nested blocks without an explicit
+		// [*] — e.g. Terraform models nested blocks as lists of maps and a rule
+		// reads attrs.settings.ip_configuration.ipv4_enabled. A numeric key still
+		// indexes the list (handled by step below).
+		if !isIndex(s.key) {
+			switch list := v.(type) {
+			case []any:
+				for i, e := range list {
+					resolve(e, segs, models.JoinIndex(prefix, i), env, out)
+				}
+				return
+			case []map[string]any:
+				for i, e := range list {
+					resolve(e, segs, models.JoinIndex(prefix, i), env, out)
+				}
+				return
+			}
+		}
 		if next, key, ok := step(v, s.key); ok {
 			resolve(next, rest, key(prefix), env, out)
 		}
