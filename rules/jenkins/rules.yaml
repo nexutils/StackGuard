@@ -1,0 +1,2051 @@
+# jenkins rules for StackGuard.
+# One YAML document per rule; edit or add rules and run `make test`.
+#
+# The parser (internal/parser/jenkins) emits one rich "jenkins" resource per
+# Jenkinsfile. Rules target `resource: jenkins` and query into pipeline.*,
+# stages[*], steps[*], agents[*], env_entries[*], libraries[*], strings[*],
+# context.files[*] and text. Source categories (pipeline/agent/build/deploy/
+# testing/artifact/logging/notification/production) are mapped onto the StackGuard
+# set (security, reliability, operational, maintainability, performance).
+# Broad "missing best-practice" advisories ship disabled by default.
+
+# -----------------------------------------------------------------------------
+# SECURITY
+# -----------------------------------------------------------------------------
+id: JENK_SEC_001
+title: Secret is hardcoded in pipeline
+severity: ERROR
+category: security
+target: jenkins
+resource: jenkins
+message: A secret, token or key is written as a literal value in the Jenkinsfile
+pass_message: No hardcoded secrets found
+description: |
+  Jenkinsfiles are stored in the repository and shown in replay and
+  pipeline-syntax views, so literal secrets are visible to everyone with
+  read access and remain in git history.
+remediation: |
+  Store the value as a Jenkins credential and use it through credentials() in
+  environment or withCredentials; rotate the exposed secret.
+query:
+  any:
+    - path: env_entries[*]
+      where:
+        all:
+          - path: key
+            matches: '(?i)(secret|token|api_?key|private_?key|client_?secret|access_?key|auth_?key|signing_?key)'
+          - path: value_kind
+            equals: literal
+          - path: value
+            matches: '\S'
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            in: [sh, bat, powershell, pwsh]
+          - path: script
+            matches: '(?i)(secret|token|api[_-]?key|client[_-]?secret)[a-z_-]*\s*[=:]\s*["'']?[A-Za-z0-9/+_\-.]{8,}'
+---
+id: JENK_SEC_002
+title: Password detected in Jenkinsfile
+severity: ERROR
+category: security
+target: jenkins
+resource: jenkins
+message: A password is written as a literal value
+pass_message: No hardcoded passwords found
+description: |
+  Literal passwords in environment blocks or shell commands are exposed in
+  the repository, in replay and often in the console log.
+remediation: |
+  Use a username/password credential with withCredentials
+  (usernamePassword) or credentials() and pass it to the command through an
+  environment variable.
+query:
+  any:
+    - path: env_entries[*]
+      where:
+        all:
+          - path: key
+            matches: '(?i)(password|passwd|pwd)'
+          - path: value_kind
+            equals: literal
+          - path: value
+            matches: '\S'
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            in: [sh, bat, powershell, pwsh]
+          - any:
+              - path: script
+                matches: '(?i)(--password|--pass)[= ][^\s$%]\S*'
+              - path: script
+                matches: '(?i)\b(password|passwd|pwd)\s*=\s*["'']?[^\s"''$%][^\s"'']{3,}'
+              - path: script
+                matches: '\bdocker\s+login\b[^\n]*\s-p\s+[^\s$]\S*'
+              - path: script
+                matches: '\bmysql(dump|admin)?\b[^\n]*\s-p[^\s$-]\S*'
+---
+id: JENK_SEC_003
+title: API token detected in pipeline code
+severity: ERROR
+category: security
+target: jenkins
+resource: jenkins
+message: A platform API token appears in plaintext
+pass_message: No platform API tokens found
+description: |
+  Tokens for GitHub, GitLab, Slack, npm, PyPI and similar services grant
+  direct API access and are abused within minutes of leaking.
+remediation: |
+  Revoke the token, store the replacement as a Jenkins secret text credential
+  and bind it with withCredentials.
+query:
+  path: strings[*]
+  matches: '(gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|glpat-[A-Za-z0-9_-]{20}|xox[abprs]-[A-Za-z0-9-]{10,}|npm_[A-Za-z0-9]{36}|pypi-[A-Za-z0-9_-]{50,}|sk_live_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{32,}|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})'
+---
+id: JENK_SEC_004
+title: Cloud credential detected in pipeline
+severity: ERROR
+category: security
+target: jenkins
+resource: jenkins
+message: A cloud access key or service account key is in the Jenkinsfile
+pass_message: No static cloud credentials found
+description: |
+  Static cloud keys give anyone with repository access control over cloud
+  resources.
+remediation: |
+  Remove and rotate the key; use the AWS / Azure / GCP credential plugins,
+  instance or workload identity, or OIDC federation instead.
+query:
+  any:
+    - path: strings[*]
+      matches: '((AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|"type"\s*:\s*"service_account"|AccountKey=[A-Za-z0-9+/=]{40,})'
+    - path: env_entries[*]
+      where:
+        all:
+          - path: key
+            in: [AWS_SECRET_ACCESS_KEY, AWS_ACCESS_KEY_ID, AWS_SESSION_TOKEN, AZURE_CLIENT_SECRET, ARM_CLIENT_SECRET, GOOGLE_CREDENTIALS, GOOGLE_APPLICATION_CREDENTIALS_JSON]
+          - path: value_kind
+            equals: literal
+---
+id: JENK_SEC_005
+title: SSH private key detected in Jenkinsfile
+severity: ERROR
+category: security
+target: jenkins
+resource: jenkins
+message: An SSH or other private key is embedded in the pipeline
+pass_message: No embedded private keys found
+description: |
+  An embedded private key grants access to every server or repository that
+  trusts it.
+remediation: |
+  Remove and rotate the key; store it as an SSH username-with-private-key
+  credential and use sshagent or withCredentials(sshUserPrivateKey).
+query:
+  any:
+    - path: strings[*]
+      matches: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            in: [sh, bat, writeFile]
+          - path: args
+            matches: '(?i)(id_rsa|id_ed25519|id_ecdsa)[^\n]*(<<|echo|text\s*:)'
+---
+id: JENK_SEC_006
+title: Credentials binding is not used
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: An authenticated command runs without a Jenkins credentials binding
+pass_message: Authenticated commands use credential bindings
+description: |
+  Commands that log in to registries, clouds or clusters without
+  withCredentials rely on secrets stored on the agent or in the code, which
+  are neither masked nor scoped.
+remediation: |
+  Wrap the command in withCredentials / sshagent / withAWS / withKubeConfig /
+  docker.withRegistry, or set the variable with credentials() in environment.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - path: script
+        matches: '\b(docker\s+login|helm\s+registry\s+login|npm\s+(publish|login)|twine\s+upload|git\s+push\s+https?://|curl\b[^\n]*\s(-u|--user|-H\s*["'']?Authorization)|aws\s+\S+|az\s+login|gcloud\s+auth|kubectl\s+--token|vault\s+login|ssh\s|scp\s|rsync\b[^\n]*\s-e\s*ssh)'
+      - path: credentials_in_scope
+        equals: false
+---
+id: JENK_SEC_007
+title: Secret may be exposed in logs
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: A credential is interpolated into a shell command with a Groovy double-quoted string
+pass_message: Credentials are not interpolated into shell strings
+description: |
+  With "${PASSWORD}" in a double-quoted Groovy string, Groovy inserts the
+  secret into the command before the shell runs, so it can leak through
+  process listings, set -x output or error messages, and Jenkins flags it as
+  insecure interpolation.
+remediation: |
+  Use single-quoted shell strings and let the shell expand the variable
+  (sh 'curl -u "$USER:$PASS" ...').
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - path: quote
+        in: [double, triple_double]
+      - path: credentials_in_scope
+        equals: true
+      - path: script
+        matches: '\$\{?\s*(env\.)?[A-Za-z_]*(PASS|PASSWORD|PSW|TOKEN|SECRET|KEY|CRED|USR)[A-Za-z_]*\s*\}?'
+---
+id: JENK_SEC_008
+title: Shell command may print sensitive variables
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: A shell step echoes a secret variable or dumps the whole environment
+pass_message: No shell steps print secrets or the environment
+description: |
+  Masking only hides exact secret values; base64, URL-encoded or partial
+  values and env dumps leak credentials into the console log.
+remediation: |
+  Do not print secrets or the environment; remove printenv / env / set
+  dumps from pipelines that bind credentials.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - any:
+          - path: script
+            matches: '(?i)\b(echo|printf|cat|Write-Output|Write-Host)\b[^\n|]*\$\{?\s*(env\.)?[A-Za-z_]*(PASS|PASSWORD|PSW|TOKEN|SECRET|API_?KEY|PRIVATE_?KEY)[A-Za-z_]*'
+          - path: script
+            matches: '(?m)^\s*(printenv|env|set|export\s+-p|Get-ChildItem\s+env:)\s*$'
+---
+id: JENK_SEC_009
+title: Untrusted script execution detected
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: The pipeline evaluates dynamic code, loads unpinned libraries or injects parameters into shell
+pass_message: No untrusted code execution detected
+description: |
+  evaluate(), load and Eval run arbitrary Groovy; shared libraries without a
+  pinned version run whatever is on the default branch; build parameters
+  interpolated into double-quoted shell strings allow command injection.
+remediation: |
+  Pin shared libraries to a tag or commit (@Library('lib@v1.2.3')), avoid
+  evaluate / load of workspace files, and pass parameters through environment
+  variables in single-quoted shell strings.
+query:
+  any:
+    - path: steps[*]
+      where:
+        path: name
+        in: [evaluate, load]
+    - path: text
+      matches: '\b(Eval\.(me|x|xy|xyz)|new\s+GroovyShell|GroovyClassLoader)\b'
+    - path: libraries[*]
+      where:
+        any:
+          - path: version
+            exists: false
+          - path: version
+            in: [main, master, develop, dev, trunk, HEAD]
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            in: [sh, bat, powershell, pwsh]
+          - path: quote
+            in: [double, triple_double]
+          - path: script
+            matches: '\$\{\s*params\.'
+---
+id: JENK_SEC_010
+title: Remote script executed without verification
+severity: ERROR
+category: security
+target: jenkins
+resource: jenkins
+message: A downloaded script or binary is executed without a checksum check
+pass_message: Downloaded scripts are verified before execution
+description: |
+  Code fetched at build time runs with the agent's credentials; a compromised
+  download server compromises the pipeline.
+remediation: |
+  Verify a pinned checksum or signature before executing, or use a pinned
+  tool installer / container image.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - any:
+          - all:
+              - path: script
+                matches: '\b(curl|wget)\b[^\n]*\s(-o|-O|--output)\s*\S+'
+              - path: script
+                matches: '(\b(ba|z|da)?sh\s+\S+|chmod\s+\+x|\./\S+)'
+              - not: { path: script, matches: '(sha256sum|sha512sum|shasum|gpg\s+--verify|gpgv|cosign\s+verify|minisign)' }
+          - path: script
+            matches: '<\(\s*(curl|wget)\b'
+          - path: script
+            matches: '(?i)(iex|Invoke-Expression)\s*\(?\s*\(?\s*(New-Object\s+Net\.WebClient|iwr|Invoke-WebRequest)'
+---
+id: JENK_SEC_011
+title: curl | bash pattern detected
+severity: ERROR
+category: security
+target: jenkins
+resource: jenkins
+message: Remote content is piped directly into a shell or interpreter
+pass_message: No remote content piped into a shell
+description: |
+  curl | bash runs unverified code on the agent with its credentials, and a
+  dropped connection can execute a truncated script.
+remediation: |
+  Download, verify a checksum, then execute, or install from a signed package
+  repository / pinned image.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - path: script
+        matches: '\b(curl|wget)\b[^;&\n]*\|\s*(sudo\s+)?(-E\s+)?((ba|z|da)?sh|python3?|perl|node)\b'
+---
+id: JENK_SEC_012
+title: Pipeline runs with excessive privileges
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: The build uses sudo, privileged containers, root or the Docker socket
+pass_message: No privileged execution detected
+description: |
+  Privileged containers, the host Docker socket and sudo let a malicious
+  dependency or pull request take over the agent and every secret on it.
+remediation: |
+  Run builds as an unprivileged user in containers, build images with
+  rootless tools (BuildKit rootless, Kaniko, Buildah), and remove sudo from
+  agents.
+query:
+  any:
+    - path: agents[*]
+      where:
+        any:
+          - path: args
+            matches: '(--privileged|-v\s*/var/run/docker\.sock|--pid[= ]host|--network[= ]host|--cap-add[= ](ALL|SYS_ADMIN))'
+          - path: yaml
+            matches: '(privileged:\s*true|hostPath:[\s\S]*docker\.sock|hostNetwork:\s*true|hostPID:\s*true)'
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            in: [sh, bat, powershell, pwsh]
+          - path: script
+            matches: '(^|[;&|\s])sudo\s|\bdocker\s+run\b[^\n]*--privileged'
+---
+id: JENK_SEC_013
+title: Shared agent may expose sensitive data
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: Credentials are used on a static, shared agent
+pass_message: Credentials run on ephemeral agents
+description: |
+  On long-lived agents shared between jobs, credential files, docker logins
+  and workspaces stay on disk where other builds (including pull request
+  builds) can read them.
+remediation: |
+  Use ephemeral container or Kubernetes agents for jobs that handle secrets,
+  or dedicate locked-down agents to deployment jobs.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [withCredentials, sshagent, withAWS, withVault, withDockerRegistry, withKubeConfig]
+      - path: agent.type
+        in: [any, label, node]
+---
+id: JENK_SEC_014
+title: Workspace cleanup not configured
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: Secret files are written to the workspace without cleanup
+pass_message: Secret files are cleaned from the workspace
+description: |
+  kubeconfigs, credential files, .npmrc / .docker/config.json and similar
+  files written during the build stay in the workspace after it finishes.
+remediation: |
+  Add cleanWs() / deleteDir() in post { always } or post { cleanup }, and
+  prefer file credentials bound with withCredentials, which Jenkins deletes
+  automatically.
+query:
+  all:
+    - any:
+        - path: steps[*]
+          where:
+            all:
+              - path: name
+                equals: writeFile
+              - path: args
+                matches: '(?i)(key|secret|token|cred|password|kubeconfig|\.npmrc|\.pypirc|\.netrc|\.pem|config\.json)'
+        - path: steps[*]
+          where:
+            all:
+              - path: name
+                in: [sh, bat]
+              - path: script
+                matches: '(?i)(docker\s+login|>\s*\S*(\.npmrc|\.pypirc|\.netrc|kubeconfig|\.pem|credentials|config\.json))'
+    - not:
+        path: steps[*]
+        where:
+          all:
+            - path: in_post
+              equals: true
+            - path: name
+              in: [cleanWs, deleteDir]
+---
+id: JENK_SEC_015
+title: Build artifacts may contain secrets
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: Archived or stashed files include the whole workspace or secret files
+pass_message: Archived artifacts exclude secrets
+description: |
+  Broad patterns such as ** archive .git (with credentials in its config),
+  .env files, keys and kubeconfigs for anyone who can view the build.
+remediation: |
+  Archive only the build outputs (e.g. target/*.jar) and add excludes for
+  secret files.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [archiveArtifacts, stash, publishHTML]
+      - any:
+          - path: args
+            matches: '(includes|artifacts)?\s*:?\s*["'']\*\*(/\*)?["'']'
+          - path: args
+            matches: '(?i)(\.env\b|\.pem|\.key\b|id_rsa|kubeconfig|\.npmrc|\.pypirc|credentials|\.git/)'
+
+# -----------------------------------------------------------------------------
+# PIPELINE
+# -----------------------------------------------------------------------------
+---
+id: JENK_PIPE_001
+title: Pipeline does not define stages
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: The pipeline has no stages
+pass_message: The pipeline defines stages
+description: |
+  Without stages, the build shows as one block in Stage View, failures cannot
+  be located, and stage-level timeouts, agents and approvals are impossible.
+remediation: |
+  Split the pipeline into named stages (Checkout, Build, Test, Scan, Deploy).
+query:
+  not: { path: 'stages', length_gte: 1 }
+---
+id: JENK_PIPE_002
+title: Pipeline timeout is not configured
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: No global timeout limits the pipeline's run time
+pass_message: The pipeline sets a global timeout
+description: |
+  A stuck build holds an executor (and possibly a deployment lock) forever.
+remediation: |
+  Add options { timeout(time: 60, unit: 'MINUTES') } (declarative) or wrap the
+  scripted body in timeout().
+query:
+  path: pipeline.has_global_timeout
+  equals: false
+---
+id: JENK_PIPE_003
+title: Build retry policy is not configured
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: No retry is configured anywhere in the pipeline
+pass_message: The pipeline configures retries
+description: |
+  Transient failures (registry timeouts, flaky network, agent loss) fail the
+  whole build and require manual reruns.
+remediation: |
+  Wrap network-dependent steps in retry(3) { ... }, or use options { retry(2) }
+  on stages that are safe to repeat.
+enabled: false
+query:
+  all:
+    - not: { path: 'pipeline.options_names', contains: retry }
+    - not: { path: 'stages[*].options_names', contains: retry }
+    - not: { path: 'steps[*].name', equals: retry }
+---
+id: JENK_PIPE_004
+title: Error handling is not configured
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: The pipeline has no failure handling
+pass_message: The pipeline handles failures
+description: |
+  Without post failure blocks, catchError or try / catch, failures leave no
+  cleanup, rollback or notification.
+remediation: |
+  Add post { failure { ... } } (declarative) or try / catch / finally
+  (scripted), and use catchError where a step may fail without failing the
+  build.
+query:
+  all:
+    - not: { path: 'pipeline.post_conditions', contains_any: [failure, unsuccessful, always] }
+    - not: { path: 'stages[*].post_conditions', contains_any: [failure, unsuccessful, always] }
+    - not: { path: 'steps[*].name', in: [catchError, warnError] }
+    - not: { path: 'text', matches: '\btry\s*\{' }
+---
+id: JENK_PIPE_005
+title: Parallel stages lack failure controls
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: A parallel block keeps running all branches after one fails
+pass_message: Parallel stages fail fast
+description: |
+  Without failFast, remaining branches keep consuming executors and time
+  after the outcome is already a failure.
+remediation: |
+  Set failFast true on the parallel stage, or options { parallelsAlwaysFailFast() }
+  on the pipeline.
+query:
+  all:
+    - not: { path: 'pipeline.options_names', contains: parallelsAlwaysFailFast }
+    - path: stages[*]
+      where:
+        all:
+          - path: parallel
+            equals: true
+          - not: { path: failFast, equals: true }
+---
+id: JENK_PIPE_006
+title: Long-running step has no timeout
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: A build, test, deploy or wait command runs without a timeout
+pass_message: Long-running steps are bounded by a timeout
+description: |
+  Builds, test suites, image builds and rollout waits are the steps that
+  hang; without a timeout they hold the executor until someone aborts them.
+remediation: |
+  Wrap the step in timeout(time: N, unit: 'MINUTES') or set a stage timeout
+  option.
+query:
+  all:
+    - path: pipeline.has_global_timeout
+      equals: false
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            in: [sh, bat, powershell, pwsh]
+          - path: script
+            matches: '\b(mvn|gradle|gradlew|npm\s+(test|run)|yarn\s+(test|build)|pytest|go\s+test|docker\s+(build|buildx)|terraform\s+(apply|plan)|helm\s+(upgrade|install)|kubectl\s+(rollout|wait)|ansible-playbook|sleep\s+[0-9]{3,})'
+          - not: { path: enclosing, contains: timeout }
+          - path: stage_has_timeout
+            equals: false
+---
+id: JENK_PIPE_007
+title: Manual approval step lacks timeout
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: An input step or stage input waits for approval without a timeout
+pass_message: Approval steps have a timeout
+description: |
+  An unanswered approval keeps the build (and often an executor and a
+  deployment lock) waiting indefinitely.
+remediation: |
+  Wrap input in timeout(time: 1, unit: 'HOURS'), or add a stage timeout
+  option, and abort cleanly when it expires.
+query:
+  any:
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            equals: input
+          - not: { path: enclosing, contains: timeout }
+          - path: stage_has_timeout
+            equals: false
+    - path: stages[*]
+      where:
+        all:
+          - path: input
+            exists: true
+          - path: has_timeout
+            equals: false
+---
+id: JENK_PIPE_008
+title: Pipeline may hang indefinitely
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: A wait, loop or interactive command can block forever
+pass_message: No unbounded waits detected
+description: |
+  waitUntil without a timeout, infinite loops, follow / watch modes and
+  interactive commands never finish on their own.
+remediation: |
+  Bound every wait with timeout(), remove -it / -f / --watch flags from CI
+  commands, and use non-interactive options.
+query:
+  all:
+    - path: pipeline.has_global_timeout
+      equals: false
+    - any:
+        - path: steps[*]
+          where:
+            all:
+              - path: name
+                equals: waitUntil
+              - not: { path: enclosing, contains: timeout }
+        - path: steps[*]
+          where:
+            all:
+              - path: name
+                in: [sh, bat, powershell, pwsh]
+              - path: script
+                matches: '(\bread\s+-?[a-z]*\s*\w|docker\s+(run|exec)\b[^\n]*\s-it?\b|docker\s+attach|tail\s+-f|kubectl\s+(logs|get)\b[^\n]*\s(-f|-w|--watch|--follow)\b|\bwatch\s)'
+        - path: text
+          matches: 'while\s*\(\s*true\s*\)'
+---
+id: JENK_PIPE_009
+title: Post actions are not configured
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: The pipeline has no post section (declarative) or finally block (scripted)
+pass_message: The pipeline defines post actions
+description: |
+  Post actions are where cleanup, test report publishing and notifications
+  run regardless of the build result.
+remediation: |
+  Add post { always { ... } failure { ... } } or a try / finally block.
+query:
+  any:
+    - all:
+        - path: pipeline.kind
+          equals: declarative
+        - not: { path: 'pipeline.post_conditions', length_gte: 1 }
+    - all:
+        - path: pipeline.kind
+          equals: scripted
+        - not: { path: 'text', matches: '\bfinally\s*\{' }
+---
+id: JENK_PIPE_010
+title: Build cleanup step is missing
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: The workspace is never cleaned on a persistent agent
+pass_message: The workspace is cleaned
+description: |
+  Leftover workspaces fill agent disks and let stale files leak into later
+  builds.
+remediation: |
+  Call cleanWs() in post { cleanup } (or always), or use ephemeral container
+  agents.
+query:
+  all:
+    - not: { path: 'steps[*].name', in: [cleanWs, deleteDir] }
+    - not: { path: 'pipeline.options_names', contains: skipDefaultCheckout }
+    - path: agents[*]
+      where:
+        path: type
+        in: [any, label, node]
+
+# -----------------------------------------------------------------------------
+# AGENTS
+# -----------------------------------------------------------------------------
+---
+id: JENK_AGENT_001
+title: Pipeline runs on any available agent
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: agent any is used
+pass_message: Agents are scoped to a label or container
+description: |
+  agent any can schedule the build on any node, including the controller or
+  agents meant for other teams, with whatever tools and credentials they hold.
+remediation: |
+  Use a specific label or a container / Kubernetes agent with a pinned image.
+query:
+  path: agents[*]
+  where:
+    path: type
+    equals: any
+---
+id: JENK_AGENT_002
+title: Agent label is not specified
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A node or label agent is declared without a label
+pass_message: Agents specify a label
+description: |
+  node { } or an empty label runs on the first free executor, including the
+  built-in controller node.
+remediation: |
+  Always pass a label: node('linux-build') { } / agent { label 'linux-build' }.
+query:
+  path: agents[*]
+  where:
+    all:
+      - path: type
+        in: [label, node]
+      - any:
+          - path: label
+            exists: false
+          - path: label
+            matches: '^\s*$'
+---
+id: JENK_AGENT_003
+title: Docker agent image is not pinned
+severity: WARNING
+category: maintainability
+target: jenkins
+resource: jenkins
+message: A container agent image has no digest or uses a floating tag
+pass_message: Container agent images are pinned by digest
+description: |
+  Floating tags change the build toolchain without any change in the
+  repository.
+remediation: |
+  Use a full version tag plus digest (image 'maven:3.9.9-eclipse-temurin-21@sha256:...').
+enabled: false
+query:
+  path: agents[*]
+  where:
+    all:
+      - path: type
+        in: [docker, kubernetes]
+      - path: 'images[*]'
+        not_matches: '@sha256:[a-f0-9]{64}$'
+---
+id: JENK_AGENT_004
+title: Docker agent uses latest tag
+severity: ERROR
+category: maintainability
+target: jenkins
+resource: jenkins
+message: A container agent image uses latest or has no tag
+pass_message: Container agent images use pinned tags
+description: |
+  latest changes between builds, so the same commit can build differently or
+  break overnight.
+remediation: |
+  Reference an immutable version tag (and digest).
+query:
+  path: agents[*]
+  where:
+    any:
+      - path: 'images[*]'
+        matches: ':latest(@|$)'
+      - all:
+          - path: images
+            length_gte: 1
+          - path: 'images[*]'
+            not_matches: '(:[^/:@]+|@sha256:[a-f0-9]{64})$'
+---
+id: JENK_AGENT_005
+title: Agent container runs as root
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: The agent container is started as root
+pass_message: Agent containers run as an unprivileged user
+description: |
+  Build steps running as root can modify the image, mounted volumes and, with
+  a mounted Docker socket, the host.
+remediation: |
+  Run the container as an unprivileged UID (args '-u 1000:1000',
+  runAsUser / runAsNonRoot in the pod template).
+query:
+  path: agents[*]
+  where:
+    any:
+      - path: args
+        matches: '(-u|--user)[ =]["'']?(root|0)(:|\b)'
+      - path: yaml
+        matches: '(runAsUser:\s*0\b|runAsNonRoot:\s*false)'
+---
+id: JENK_AGENT_006
+title: Shared build agent detected
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: The build runs on the controller or a generic shared agent
+pass_message: Builds avoid the controller and shared agents
+description: |
+  Builds on the controller can read Jenkins secrets and configuration; generic
+  shared agents mix workspaces and credentials of unrelated jobs.
+remediation: |
+  Set the controller's executors to 0, and use dedicated labels or ephemeral
+  agents per job type.
+query:
+  path: agents[*]
+  where:
+    path: label
+    matches: '(?i)^\s*(master|built-in|controller|shared|common|default|any)\s*$'
+---
+id: JENK_AGENT_007
+title: Ephemeral build agent not used
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: No stage runs on a container or Kubernetes agent
+pass_message: Builds use ephemeral agents
+description: |
+  Static agents accumulate tools, caches and secrets over time and make builds
+  depend on agent state.
+remediation: |
+  Use docker / dockerfile / kubernetes agents (or cloud agents that are
+  created per build).
+enabled: false
+query:
+  not:
+    path: agents[*]
+    where:
+      any:
+        - path: type
+          in: [docker, dockerfile, kubernetes]
+        - path: label
+          matches: '(?i)(ephemeral|ec2|spot|k8s|kubernetes|pod|container|docker)'
+
+# -----------------------------------------------------------------------------
+# BUILD
+# -----------------------------------------------------------------------------
+---
+id: JENK_BUILD_001
+title: Build tool versions are not pinned
+severity: WARNING
+category: maintainability
+target: jenkins
+resource: jenkins
+message: Build tools come from the agent or an unversioned tool installation
+pass_message: Build tools are pinned
+description: |
+  When mvn, node, gradle or go come from whatever is installed on the agent,
+  or from a tool named "latest", the toolchain differs between agents and
+  over time.
+remediation: |
+  Run builds in pinned container images, or reference versioned tool
+  installations in tools { maven 'maven-3.9.9'; jdk 'temurin-21' }.
+enabled: false
+query:
+  any:
+    - path: 'pipeline.tools[*]'
+      where:
+        any:
+          - path: name
+            matches: '(?i)(latest|current|default|stable)'
+          - path: name
+            not_matches: '[0-9]'
+    - all:
+        - path: pipeline.tools
+          exists: false
+        - not:
+            path: agents[*]
+            where:
+              path: type
+              in: [docker, dockerfile, kubernetes]
+        - path: steps[*]
+          where:
+            all:
+              - path: name
+                in: [sh, bat, powershell, pwsh]
+              - path: script
+                matches: '(^|[;&|\s])(mvn|gradle|npm|yarn|pnpm|node|go|dotnet|python3?|pip3?|java|javac)\s'
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            in: [sh, bat]
+          - path: script
+            matches: '\b(nvm\s+install\s+(--lts|node|stable)?\s*$|sdk\s+install\s+\w+\s*$|pyenv\s+install\s+--latest)'
+---
+id: JENK_BUILD_002
+title: Dependency versions are not pinned
+severity: WARNING
+category: maintainability
+target: jenkins
+resource: jenkins
+message: A tool or package is installed without a version
+pass_message: Installed packages are pinned
+description: |
+  Ad-hoc installs pull the newest release on every build, making builds
+  non-reproducible and exposed to malicious releases.
+remediation: |
+  Pin versions (pip install x==1.2.3, npm i -g x@1.2.3, go install
+  x@v1.2.3, apt-get install pkg=version) or bake tools into the agent image.
+enabled: false
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - any:
+          - all:
+              - path: script
+                matches: '\bpip3?\s+install\s+(-\S+\s+)*[A-Za-z][A-Za-z0-9._-]*(\s|$)'
+              - not: { path: script, matches: '\bpip3?\s+install\s+(-r\b|--requirement|-e\b|\.)' }
+              - not: { path: script, matches: '\bpip3?\s+install[^\n]*==' }
+          - path: script
+            matches: '\bnpm\s+(install|i)\s+(-g|--global)\s+(@[a-z0-9-]+/)?[a-z0-9._-]+(\s|$)'
+          - path: script
+            matches: '\bgo\s+install\s+\S+@latest\b'
+          - all:
+              - path: script
+                matches: '\bcargo\s+install\s+\S'
+              - not: { path: script, matches: 'cargo\s+install[^\n]*--version' }
+          - all:
+              - path: script
+                matches: '\bgem\s+install\s+\S'
+              - not: { path: script, matches: 'gem\s+install[^\n]*(-v|--version)' }
+---
+id: JENK_BUILD_003
+title: Build is not reproducible
+severity: WARNING
+category: maintainability
+target: jenkins
+resource: jenkins
+message: The build upgrades packages or ignores lockfiles
+pass_message: The build honours lockfiles
+description: |
+  Package upgrades and lockfile-ignoring installs produce different outputs
+  from the same commit.
+remediation: |
+  Avoid apt-get / yum upgrade in builds; use npm ci, yarn --frozen-lockfile /
+  --immutable, pnpm --frozen-lockfile, poetry / uv with locks.
+enabled: false
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - any:
+          - path: script
+            matches: '\b(apt(-get)?\s+(-\S+\s+)*(upgrade|dist-upgrade|full-upgrade)|apk\s+upgrade|(yum|dnf)\s+(-\S+\s+)*(update|upgrade))\b'
+          - all:
+              - path: script
+                matches: '\bnpm\s+(install|i)\b'
+              - not: { path: script, matches: '\bnpm\s+(install|i)\s+(-g|--global)' }
+              - not: { path: script, matches: '\bnpm\s+ci\b' }
+          - all:
+              - path: script
+                matches: '\byarn(\s+install)?(\s|$|&)'
+              - not: { path: script, matches: 'yarn[^\n]*--(frozen-lockfile|immutable)' }
+          - all:
+              - path: script
+                matches: '\bpnpm\s+(install|i)\b'
+              - not: { path: script, matches: 'pnpm[^\n]*--frozen-lockfile' }
+---
+id: JENK_BUILD_004
+title: Artifact version is not defined
+severity: WARNING
+category: maintainability
+target: jenkins
+resource: jenkins
+message: An image or artifact is built or published without a version
+pass_message: Artifacts are versioned
+description: |
+  Untagged or latest-tagged artifacts cannot be traced to a commit or rolled
+  back to.
+remediation: |
+  Tag artifacts with a semantic version and / or ${GIT_COMMIT} / ${BUILD_NUMBER}
+  (docker build -t app:${VERSION}).
+enabled: false
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - any:
+          - path: script
+            matches: '\bdocker\s+(build|buildx\s+build)\b[^\n]*\s(-t|--tag)[ =][^\s:$]+(\s|$)'
+          - path: script
+            matches: '\s(-t|--tag)[ =]\S+:latest\b'
+          - path: script
+            matches: '\bdocker\s+push\s+\S+:latest\b'
+---
+id: JENK_BUILD_005
+title: Build metadata is missing
+severity: WARNING
+category: maintainability
+target: jenkins
+resource: jenkins
+message: Builds do not record commit, version or source metadata
+pass_message: Builds record metadata
+description: |
+  Without a build name / description or image labels, nobody can tell which
+  commit or version a build or artifact belongs to.
+remediation: |
+  Set currentBuild.displayName / description, and add OCI labels
+  (org.opencontainers.image.revision / source / version) to images.
+enabled: false
+query:
+  all:
+    - not: { path: 'text', matches: 'currentBuild\.(displayName|description)\s*=|\bbuildName\b|\bbuildDescription\b' }
+    - not: { path: 'text', matches: 'org\.opencontainers\.image\.(revision|source|version)|--build-arg\s+(GIT_COMMIT|VCS_REF|BUILD_NUMBER|VERSION)' }
+---
+id: JENK_BUILD_006
+title: Build cache strategy is not configured
+severity: WARNING
+category: performance
+target: jenkins
+resource: jenkins
+message: Dependencies are downloaded on every build without a cache
+pass_message: The build uses a dependency cache
+description: |
+  Fresh downloads on every build slow the pipeline and fail when registries
+  are unavailable or rate-limited.
+remediation: |
+  Mount a dependency cache (~/.m2, ~/.npm, ~/.gradle) into container agents,
+  use the Job Cacher plugin, or docker build --cache-from / BuildKit cache
+  mounts.
+enabled: false
+query:
+  all:
+    - path: steps[*]
+      where:
+        all:
+          - path: name
+            in: [sh, bat, powershell, pwsh]
+          - path: script
+            matches: '\b(mvn|gradlew?|npm\s+(ci|install)|yarn|pnpm\s+install|pip3?\s+install|go\s+(build|mod\s+download)|docker\s+(build|buildx))\b'
+    - not: { path: 'text', matches: '(--cache-from|--cache-to|-v\s*["'']?[^\s]*(\.m2|\.npm|\.gradle|\.cache|go/pkg)|maven\.repo\.local|\bcache\s*\(|GRADLE_USER_HOME|npm_config_cache|--mount=type=cache|PIP_CACHE_DIR|GOMODCACHE|persistentVolumeClaim)' }
+---
+id: JENK_BUILD_007
+title: Build output validation is missing
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: Build outputs are produced but never checked
+pass_message: Build outputs are validated
+description: |
+  Empty, incomplete or wrongly packaged artifacts are only discovered at
+  deployment.
+remediation: |
+  Validate outputs: fingerprint archived files, verify checksums, inspect
+  images (container-structure-test, docker image inspect), or list package
+  contents.
+enabled: false
+query:
+  all:
+    - any:
+        - path: 'steps[*].name'
+          equals: archiveArtifacts
+        - path: 'steps[*].script'
+          matches: '\b(docker\s+(build|buildx)|mvn\b[^\n]*\b(package|install|deploy)|gradlew?\b[^\n]*\b(build|assemble|jar)|npm\s+(pack|run\s+build)|go\s+build|dotnet\s+publish)'
+    - not: { path: 'text', matches: '(container-structure-test|sha256sum|shasum|fingerprint\s*:\s*true|\bfingerprint\s*\(|docker\s+(image\s+)?inspect|\bdive\b|jar\s+tf|unzip\s+-l|test\s+-[fs]\s)' }
+
+# -----------------------------------------------------------------------------
+# DEPLOYMENT
+# -----------------------------------------------------------------------------
+---
+id: JENK_DEPLOY_001
+title: Production deployment lacks approval step
+severity: ERROR
+category: operational
+target: jenkins
+resource: jenkins
+message: A production deployment stage runs without an input approval
+pass_message: Production deployments require approval
+description: |
+  Any commit that reaches the pipeline is deployed to production without a
+  human decision.
+remediation: |
+  Add an input directive (or an input step in an earlier stage) with a
+  submitter list before the production deployment stage.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - path: targets_prod
+        equals: true
+      - path: gated
+        equals: false
+---
+id: JENK_DEPLOY_002
+title: Deployment environment is not specified
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A deployment stage does not identify its target environment
+pass_message: Deployment stages name their environment
+description: |
+  When the target is implicit (default kube context, default workspace),
+  the same pipeline can deploy to the wrong environment.
+remediation: |
+  Name the environment explicitly (stage name, DEPLOY_ENV variable,
+  --namespace / --context / workspace arguments).
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - path: environment_name
+        exists: false
+---
+id: JENK_DEPLOY_003
+title: Rollback strategy is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: The pipeline deploys but has no rollback mechanism
+pass_message: The pipeline can roll back
+description: |
+  When a release fails there is no scripted way back to the previous
+  version.
+remediation: |
+  Use helm --atomic or helm rollback / kubectl rollout undo in post { failure },
+  or provide a parameterized rollback job.
+query:
+  all:
+    - path: stages[*]
+      where:
+        path: is_deploy
+        equals: true
+    - not: { path: 'text', matches: '(?i)(rollback|rollout\s+undo|--atomic|revert)' }
+---
+id: JENK_DEPLOY_004
+title: Deployment verification is missing
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A deployment stage does not wait for the rollout to complete
+pass_message: Deployment stages verify the rollout
+description: |
+  Without rollout checks, the stage succeeds as soon as the deploy command
+  is accepted, even if the new version never becomes ready.
+remediation: |
+  Add kubectl rollout status, helm upgrade --wait / --atomic, aws ecs wait
+  services-stable or the equivalent for your platform.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - not:
+          path: scripts
+          matches: '(rollout\s+status|kubectl\s+wait|helm\s+(upgrade|install)[^\n]*--(wait|atomic)|services-stable|deployment-successful|argocd\s+app\s+wait|az\s+\S+\s+wait|gcloud[^\n]*--wait)'
+---
+id: JENK_DEPLOY_005
+title: Health validation after deployment is missing
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A deployment stage does not check application health
+pass_message: Deployment stages validate health
+description: |
+  A rollout can complete while the application returns errors; only a health
+  or smoke check catches that.
+remediation: |
+  After deploying, call the health endpoint (httpRequest / curl --fail with
+  retries) or run a smoke test suite.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - not:
+          path: scripts
+          matches: '(?i)(health|healthz|readyz|livez|smoke|status\s+code|curl[^\n]*--fail|wget[^\n]*--spider)'
+      - not: { path: step_names, contains: httpRequest }
+---
+id: JENK_DEPLOY_006
+title: Deployment timeout is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A deployment stage has no stage-level timeout
+pass_message: Deployment stages have a timeout
+description: |
+  A hung deployment keeps the environment locked and the release state
+  unknown until someone notices.
+remediation: |
+  Add options { timeout(time: 20, unit: 'MINUTES') } to the deployment stage,
+  or wrap the deployment steps in timeout().
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - path: has_timeout
+        equals: false
+---
+id: JENK_DEPLOY_007
+title: Canary or blue-green deployment not detected
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Deployments replace the running version without progressive delivery
+pass_message: Deployments use progressive delivery
+description: |
+  All-at-once releases expose every user to a bad version before anyone can
+  react.
+remediation: |
+  Use canary or blue-green releases (Argo Rollouts, Flagger, CodeDeploy,
+  weighted load balancer / service mesh routing).
+enabled: false
+query:
+  all:
+    - path: stages[*]
+      where:
+        path: is_deploy
+        equals: true
+    - not: { path: 'text', matches: '(?i)(canary|blue[-_ ]?green|argo\s+rollouts|kubectl\s+argo\s+rollouts|flagger|setWeight|traffic[-_ ]?(shift|split)|--weight|codedeploy|aws\s+deploy|spinnaker)' }
+---
+id: JENK_DEPLOY_008
+title: Deployment notification is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A deployment stage has no notification in its post section
+pass_message: Deployment stages send notifications
+description: |
+  Teams do not learn that a deployment started, finished or failed for a
+  specific environment.
+remediation: |
+  Add a stage-level post { success / failure } that sends a message (Slack,
+  Teams, email) naming the environment and version.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - not:
+          path: post_step_names
+          contains_any: [slackSend, mail, emailext, office365ConnectorSend, googlechatnotification, discordSend, mattermostSend, rocketSend, telegramSend, httpRequest]
+---
+id: JENK_DEPLOY_009
+title: Production deployment is fully automated
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: An automatically triggered pipeline deploys to production without a gate
+pass_message: Automated production deploys are gated
+description: |
+  With SCM / cron / upstream triggers and no input step, every change on the
+  triggering branch goes straight to production.
+remediation: |
+  Require a manual approval for production, or deploy to production only from
+  a separate, manually started promotion job.
+query:
+  any:
+    - all:
+        - path: pipeline.triggers
+          length_gte: 1
+        - path: stages[*]
+          where:
+            all:
+              - path: is_deploy
+                equals: true
+              - path: targets_prod
+                equals: true
+              - path: gated
+                equals: false
+    - path: stages[*]
+      where:
+        all:
+          - path: is_deploy
+            equals: true
+          - path: targets_prod
+            equals: true
+          - path: gated
+            equals: false
+          - any:
+              - path: when
+                matches: '\bbranch\b'
+              - path: when
+                exists: false
+---
+id: JENK_DEPLOY_010
+title: Environment promotion controls are missing
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Production is deployed without an earlier staging / QA deployment
+pass_message: Releases are promoted through environments
+description: |
+  Deploying straight to production skips validation of the exact artifact in
+  a production-like environment.
+remediation: |
+  Promote the same artifact through dev / staging (or QA) before production,
+  with tests between environments.
+enabled: false
+query:
+  all:
+    - path: stages[*]
+      where:
+        all:
+          - path: is_deploy
+            equals: true
+          - path: targets_prod
+            equals: true
+    - not:
+        path: stages[*]
+        where:
+          all:
+            - path: is_deploy
+              equals: true
+            - path: environment_name
+              matches: '(?i)(stag|qa|uat|pre-?prod|test|int)'
+    - not: { path: 'text', matches: '(?i)promot' }
+
+# -----------------------------------------------------------------------------
+# TESTING
+# -----------------------------------------------------------------------------
+---
+id: JENK_TEST_001
+title: Test stage is missing
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: No stage runs tests
+pass_message: The pipeline runs tests
+description: |
+  Without a test stage, regressions are only found after deployment.
+remediation: |
+  Add a Test stage that runs the test suite and fails the build on failures.
+query:
+  all:
+    - not: { path: 'stages[*].name', matches: '(?i)(test|check|verify|qa)' }
+    - not: { path: 'steps[*].script', matches: '(?i)\b(test|pytest|jest|vitest|rspec|phpunit|tox|nox)\b' }
+---
+id: JENK_TEST_002
+title: Unit test execution not detected
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: No unit test command runs in the pipeline
+pass_message: Unit tests run in the pipeline
+description: |
+  Unit tests are the fastest feedback on broken code; without them every
+  defect is found later and at higher cost.
+remediation: |
+  Run the unit test suite (mvn test, gradle test, npm test, pytest, go test,
+  dotnet test, ...) in a dedicated stage.
+query:
+  not:
+    path: 'steps[*].script'
+    matches: '(?i)\b(npm\s+(run\s+)?test|yarn\s+test|pnpm\s+test|pytest|python\s+-m\s+(pytest|unittest)|tox|nox|go\s+test|mvn\b[^\n]*\b(test|verify|install|package)\b|gradlew?\b[^\n]*\b(test|check|build)\b|cargo\s+test|dotnet\s+test|rspec|phpunit|jest|vitest|mocha|make\s+test|bundle\s+exec\s+rake)'
+---
+id: JENK_TEST_003
+title: Integration test execution not detected
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: No integration or end-to-end tests run
+pass_message: Integration tests run in the pipeline
+description: |
+  Unit tests do not catch broken integrations with databases, queues and
+  other services.
+remediation: |
+  Add an integration / e2e stage (Testcontainers, docker compose test
+  environments, Failsafe, Cypress / Playwright, Postman / Newman).
+enabled: false
+query:
+  all:
+    - not: { path: 'steps[*].script', matches: '(?i)(integration|e2e|end-to-end|failsafe|verify\b|cypress|playwright|newman|karate|testcontainers|docker[- ]compose[^\n]*(test|run)|robot\s|behave|cucumber|-Pit\b|integrationTest)' }
+    - not: { path: 'stages[*].name', matches: '(?i)(integration|e2e|end.to.end|acceptance|system\s+test)' }
+---
+id: JENK_TEST_004
+title: Test reports are not published
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: Tests run but results are not published to Jenkins
+pass_message: Test results are published
+description: |
+  Without published reports, failures must be read from the console and test
+  trends, flaky tests and history are unavailable.
+remediation: |
+  Publish results with junit '**/target/surefire-reports/*.xml' (or xunit /
+  nunit / mstest) in post { always }.
+query:
+  all:
+    - path: 'steps[*].script'
+      matches: '(?i)\b(test|pytest|jest|vitest|rspec|phpunit|tox|go\s+test)\b'
+    - not: { path: 'steps[*].name', in: [junit, xunit, nunit, mstest, testNG, publishTestResults, recordTestResults] }
+---
+id: JENK_TEST_005
+title: Test failures may not fail the build
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: A test command ignores its exit code or test failures are configured to be ignored
+pass_message: Test failures fail the build
+description: |
+  "|| true", set +e, failure-ignore flags or catchError with SUCCESS turn red
+  test runs into green builds.
+remediation: |
+  Let test failures fail the stage; if a result must be inspected, use
+  returnStatus and fail explicitly, or mark the build UNSTABLE via junit.
+query:
+  path: steps[*]
+  where:
+    any:
+      - all:
+          - path: name
+            in: [sh, bat, powershell, pwsh]
+          - path: script
+            matches: '(?i)\b(test|pytest|jest|vitest|rspec|phpunit|tox|mvn|gradlew?)\b'
+          - path: script
+            matches: '(\|\|\s*(true|exit\s+0|:)\b|;\s*true\s*$|\bset\s+\+e\b|maven\.test\.failure\.ignore=true|testFailureIgnore|--passWithNoTests|ignoreFailures\s*=\s*true)'
+      - all:
+          - path: name
+            equals: catchError
+          - path: args
+            matches: 'buildResult\s*:\s*["'']SUCCESS["'']'
+---
+id: JENK_TEST_006
+title: Code coverage reporting is missing
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: Coverage is not collected or published
+pass_message: Code coverage is reported
+description: |
+  Without coverage data, untested code paths are invisible in review.
+remediation: |
+  Generate coverage (JaCoCo, coverage.py, nyc / c8, go -coverprofile) and
+  publish it with recordCoverage or to SonarQube / Codecov.
+enabled: false
+query:
+  not: { path: 'text', matches: '(?i)(jacoco|cobertura|recordCoverage|publishCoverage|coverage|--cov\b|lcov|codecov|coveralls|-coverprofile|nyc\b|c8\b)' }
+---
+id: JENK_TEST_007
+title: Quality gate validation is missing
+severity: WARNING
+category: reliability
+target: jenkins
+resource: jenkins
+message: No quality gate stops the pipeline on failed code quality criteria
+pass_message: A quality gate guards the pipeline
+description: |
+  Running analysis without enforcing its result (e.g. SonarQube without
+  waitForQualityGate) never blocks bad changes.
+remediation: |
+  Call waitForQualityGate abortPipeline: true after SonarQube analysis, or
+  use recordIssues qualityGates with failing thresholds.
+enabled: false
+query:
+  all:
+    - not: { path: 'steps[*].name', equals: waitForQualityGate }
+    - not: { path: 'text', matches: '(?i)(qualityGates\s*:|sonar\.qualitygate\.wait=true|quality[-_ ]?gate)' }
+
+# -----------------------------------------------------------------------------
+# ARTIFACTS
+# -----------------------------------------------------------------------------
+---
+id: JENK_ART_001
+title: Artifact retention policy is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Archived artifacts are kept forever
+pass_message: Archived artifacts have a retention policy
+description: |
+  Without artifact retention, archived files accumulate on the controller
+  until JENKINS_HOME fills up.
+remediation: |
+  Add options { buildDiscarder(logRotator(artifactNumToKeepStr: '10',
+  artifactDaysToKeepStr: '30')) }.
+query:
+  all:
+    - path: 'steps[*].name'
+      equals: archiveArtifacts
+    - not: { path: 'text', matches: '(artifactNumToKeepStr|artifactDaysToKeepStr)\s*:\s*["'']?[1-9]' }
+---
+id: JENK_ART_002
+title: Artifact signing is not configured
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: Published artifacts and images are not signed
+pass_message: Published artifacts are signed
+description: |
+  Unsigned artifacts cannot be verified at deployment time, so a tampered
+  registry or repository goes unnoticed.
+remediation: |
+  Sign images with cosign / Notation and packages with GPG / jarsigner /
+  signtool, and generate provenance attestations.
+enabled: false
+query:
+  all:
+    - path: text
+      matches: '(docker\s+push|mvn[^\n]*\bdeploy\b|gradlew?[^\n]*\bpublish|npm\s+publish|twine\s+upload|helm\s+push|archiveArtifacts)'
+    - not: { path: 'text', matches: '(?i)(cosign\s+(sign|attest)|notation\s+sign|gpg\s+(--detach-sign|-b|--sign|--clearsign)|jarsigner|signtool|maven-gpg|signArtifacts|DOCKER_CONTENT_TRUST=1|sigstore)' }
+---
+id: JENK_ART_003
+title: Artifact integrity verification is missing
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: Artifacts are deployed or consumed without checksum or signature verification
+pass_message: Artifacts are verified before use
+description: |
+  Without fingerprints, checksums or signature checks, a corrupted or
+  replaced artifact is deployed silently.
+remediation: |
+  Fingerprint archived artifacts, publish and verify checksums, and verify
+  signatures (cosign verify) before deploying.
+query:
+  all:
+    - any:
+        - path: 'steps[*].name'
+          in: [archiveArtifacts, copyArtifacts, unstash]
+        - path: stages[*]
+          where:
+            path: is_deploy
+            equals: true
+    - not: { path: 'text', matches: '(?i)(fingerprint|sha256sum|sha512sum|shasum|cosign\s+verify|gpg\s+--verify|notation\s+verify|checksum)' }
+---
+id: JENK_ART_004
+title: Build artifacts are not archived
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: The pipeline builds outputs but neither archives nor publishes them
+pass_message: Build outputs are archived or published
+description: |
+  Outputs that only exist in the workspace are lost when it is cleaned and
+  cannot be traced or redeployed.
+remediation: |
+  Archive outputs with archiveArtifacts (fingerprint: true) or upload them to
+  an artifact repository / registry.
+query:
+  all:
+    - path: 'steps[*].script'
+      matches: '\b(mvn\b[^\n]*\b(package|install)|gradlew?\b[^\n]*\b(build|assemble|jar|bootJar)|npm\s+(pack|run\s+build)|go\s+build|dotnet\s+(publish|pack)|cargo\s+build|python\s+-m\s+build)'
+    - not: { path: 'steps[*].name', equals: archiveArtifacts }
+    - not: { path: 'text', matches: '(docker\s+push|mvn[^\n]*\bdeploy\b|gradlew?[^\n]*\bpublish|npm\s+publish|twine\s+upload|nexusArtifactUploader|rtUpload|jf\s+rt\s+(u|upload)|aws\s+s3\s+(cp|sync))' }
+---
+id: JENK_ART_005
+title: Artifact repository upload not detected
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Artifacts are not uploaded to an artifact repository or registry
+pass_message: Artifacts are uploaded to a repository
+description: |
+  Artifacts kept only in Jenkins are tied to build retention and the
+  controller, and are not available to other pipelines or environments.
+remediation: |
+  Publish versioned artifacts to Nexus / Artifactory / a package registry or
+  container registry.
+enabled: false
+query:
+  not: { path: 'text', matches: '(docker\s+push|podman\s+push|buildah\s+push|crane\s+push|oras\s+push|kaniko|mvn[^\n]*\bdeploy\b|gradlew?[^\n]*\bpublish|npm\s+publish|twine\s+upload|nexusArtifactUploader|nexusPublisher|rtUpload|rtMavenRun|jf\s+rt\s+(u|upload)|curl[^\n]*\s(-T|--upload-file)\s|helm\s+push|aws\s+s3\s+(cp|sync)|gsutil\s+cp|az\s+storage\s+blob\s+upload)' }
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+---
+id: JENK_LOG_001
+title: Build log retention policy is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: No buildDiscarder limits how many builds and logs are kept
+pass_message: Build log retention is configured
+description: |
+  Without a build discarder, every build log is kept forever, filling the
+  controller disk and slowing the UI.
+remediation: |
+  Add options { buildDiscarder(logRotator(numToKeepStr: '50',
+  daysToKeepStr: '90')) } (or properties([buildDiscarder(...)]) in scripted
+  pipelines).
+query:
+  not: { path: 'text', matches: '\bbuildDiscarder\s*\(' }
+---
+id: JENK_LOG_002
+title: Console output may expose secrets
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: Shell tracing or verbose output is enabled while credentials are in scope
+pass_message: No tracing while credentials are in scope
+description: |
+  set -x, bash -x and verbose / debug flags print expanded commands and
+  request headers, including credentials that masking may not catch.
+remediation: |
+  Remove tracing and verbose flags from steps that use credentials, or turn
+  tracing off (set +x) around them.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: name
+        in: [sh, bat, powershell, pwsh]
+      - path: credentials_in_scope
+        equals: true
+      - path: script
+        matches: '(\bset\s+-[a-z]*x|\bbash\s+-[a-z]*x|\bcurl\b[^\n]*\s(-v|--verbose|--trace)\b|\s(-vvv?|--debug|--verbose)\b|Set-PSDebug\s+-Trace)'
+---
+id: JENK_LOG_003
+title: Log rotation is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A build discarder is configured without count or age limits
+pass_message: Log rotation sets count or age limits
+description: |
+  logRotator without numToKeepStr / daysToKeepStr (or with -1) keeps all
+  builds, so rotation never happens.
+remediation: |
+  Set numToKeepStr and / or daysToKeepStr to positive values.
+query:
+  all:
+    - path: text
+      matches: '\blogRotator\s*\('
+    - not: { path: 'text', matches: '(numToKeepStr|daysToKeepStr)\s*:\s*["'']?[1-9]' }
+---
+id: JENK_LOG_004
+title: Audit trail generation is missing
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Deployments do not record who approved and what was deployed
+pass_message: Deployments record an audit trail
+description: |
+  Without recording the approver, version and target, deployments cannot be
+  traced during incidents or audits.
+remediation: |
+  Capture the approver (input submitterParameter), set
+  currentBuild.description with version and environment, tag releases in git
+  or send deployment records to your change / ticket system.
+query:
+  all:
+    - path: stages[*]
+      where:
+        path: is_deploy
+        equals: true
+    - not: { path: 'text', matches: '(?i)(submitterParameter|currentBuild\.description|git\s+tag|jiraSendDeploymentInfo|recordDeployment|deployment[-_ ]?record|audit|BUILD_USER)' }
+
+# -----------------------------------------------------------------------------
+# NOTIFICATIONS
+# -----------------------------------------------------------------------------
+---
+id: JENK_NOTIFY_001
+title: Build failure notification is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Nobody is notified when the build fails
+pass_message: Failures trigger a notification
+description: |
+  Failed builds on the main branch or of deployments go unnoticed until
+  someone opens Jenkins.
+remediation: |
+  Send a message in post { failure } (or unsuccessful / always with a result
+  check) via slackSend, emailext, Teams or a webhook.
+query:
+  not:
+    path: steps[*]
+    where:
+      all:
+        - path: in_post
+          equals: true
+        - path: post_condition
+          in: [failure, unsuccessful, always, changed, regression]
+        - path: name
+          in: [slackSend, mail, emailext, office365ConnectorSend, googlechatnotification, discordSend, mattermostSend, rocketSend, telegramSend, httpRequest]
+---
+id: JENK_NOTIFY_002
+title: Deployment notification is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A deploying pipeline sends no notification on success
+pass_message: Deployments notify on success
+description: |
+  Without a success notification, teams cannot correlate incidents with
+  releases. (JENK_DEPLOY_008 checks the deployment stage itself; this rule
+  checks the pipeline-level post section.)
+remediation: |
+  Notify on success / always at pipeline level with version, environment and
+  build link.
+query:
+  all:
+    - path: stages[*]
+      where:
+        path: is_deploy
+        equals: true
+    - not:
+        path: steps[*]
+        where:
+          all:
+            - path: in_post
+              equals: true
+            - path: post_condition
+              in: [success, always, changed, fixed]
+            - path: name
+              in: [slackSend, mail, emailext, office365ConnectorSend, googlechatnotification, discordSend, mattermostSend, rocketSend, telegramSend, httpRequest]
+---
+id: JENK_NOTIFY_003
+title: Critical pipeline events are not reported
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Aborted, unstable or recovered builds are not reported
+pass_message: Critical build states are reported
+description: |
+  Aborted deployments (e.g. approval timeouts), unstable test results and
+  recoveries after failures are important states that otherwise go unseen.
+remediation: |
+  Add post { aborted / unstable / fixed / regression } blocks with
+  notifications.
+enabled: false
+query:
+  not:
+    path: steps[*]
+    where:
+      all:
+        - path: in_post
+          equals: true
+        - path: post_condition
+          in: [aborted, unstable, fixed, regression, changed]
+        - path: name
+          in: [slackSend, mail, emailext, office365ConnectorSend, googlechatnotification, discordSend, mattermostSend, rocketSend, telegramSend, httpRequest]
+---
+id: JENK_NOTIFY_004
+title: Alerting integration is not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Failures of critical pipelines do not raise an alert or incident
+pass_message: Critical pipelines raise alerts
+description: |
+  Chat messages are easy to miss; failed production deployments and
+  scheduled operational jobs should page or open an incident.
+remediation: |
+  Integrate PagerDuty, Opsgenie, Alertmanager or your incident tool for
+  failures of deployment and scheduled pipelines.
+query:
+  all:
+    - any:
+        - path: stages[*]
+          where:
+            path: is_deploy
+            equals: true
+        - path: pipeline.triggers
+          length_gte: 1
+    - not: { path: 'text', matches: '(?i)(pagerduty|opsgenie|alertmanager|victorops|splunk\s*on-?call|statuspage|incident\.io|servicenow)' }
+
+# -----------------------------------------------------------------------------
+# PRODUCTION READINESS
+# -----------------------------------------------------------------------------
+---
+id: JENK_PROD_001
+title: Environment variables are hardcoded
+severity: WARNING
+category: maintainability
+target: jenkins
+resource: jenkins
+message: Environment-specific endpoints or hosts are hardcoded in the pipeline
+pass_message: Environment values are not hardcoded
+description: |
+  Hardcoded URLs, hosts and IPs tie the pipeline to one environment and
+  must be edited in code for every change.
+remediation: |
+  Move environment-specific values to parameters, folder / global properties
+  or config files per environment.
+enabled: false
+query:
+  path: env_entries[*]
+  where:
+    all:
+      - path: key
+        matches: '(?i)(host|url|uri|endpoint|server|address|addr|dsn|domain|cluster|registry)'
+      - path: value_kind
+        equals: literal
+      - not: { path: value, matches: '(?i)^\s*["'']?(localhost|127\.0\.0\.1|0\.0\.0\.0)' }
+      - path: value
+        matches: '\S'
+---
+id: JENK_PROD_002
+title: Production environment protection is missing
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A production deployment stage is not restricted to a release branch or tag
+pass_message: Production stages are branch/tag protected
+description: |
+  Without a branch / tag condition, feature branches and pull request builds
+  of a multibranch pipeline can deploy to production.
+remediation: |
+  Add when { branch 'main' } or when { buildingTag() } (with beforeInput /
+  beforeAgent) to production stages.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - path: targets_prod
+        equals: true
+      - not: { path: when, matches: '\b(branch|buildingTag|tag)\b' }
+---
+id: JENK_PROD_003
+title: Change approval workflow is missing
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: A production approval can be given by anyone
+pass_message: Production approvals are restricted
+description: |
+  An input step without a submitter list lets any user with build
+  permission approve production changes, including the author.
+remediation: |
+  Restrict approvals with submitter: 'release-managers' and record the
+  approver with submitterParameter.
+query:
+  path: stages[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - path: targets_prod
+        equals: true
+      - path: gated
+        equals: true
+      - path: input_submitter
+        exists: false
+---
+id: JENK_PROD_004
+title: Disaster recovery workflow not detected
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: No pipeline in the repository automates disaster recovery
+pass_message: A disaster recovery workflow exists
+description: |
+  Recovery steps that only exist in documentation are slow and error-prone
+  when they are actually needed.
+remediation: |
+  Automate failover / restore in a dedicated, regularly exercised pipeline.
+enabled: false
+query:
+  all:
+    - not: { path: 'text', matches: '(?i)(disaster[-_ ]?recovery|failover|\bdr[-_ ](drill|test|restore|switch))' }
+    - not: { path: 'context.files[*]', matches: '(?i)(disaster|failover|(^|[/_-])dr[/_.-])[^/]*$' }
+---
+id: JENK_PROD_005
+title: Backup validation workflow not detected
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: No pipeline verifies that backups can be restored
+pass_message: A backup validation workflow exists
+description: |
+  Backups that are never restored often turn out to be incomplete or
+  unusable.
+remediation: |
+  Schedule a pipeline that restores the latest backup into a scratch
+  environment and validates it.
+enabled: false
+query:
+  all:
+    - not: { path: 'text', matches: '(?i)(restore[-_ ]?(test|verify|validation|drill)|restic\s+check|borg\s+check|pg_verifybackup|velero\s+restore|backup[-_ ]?verif)' }
+    - not: { path: 'context.files[*]', matches: '(?i)(restore|backup)[^/]*(test|verify|check)[^/]*$' }
+---
+id: JENK_PROD_006
+title: Infrastructure drift detection not configured
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: An infrastructure pipeline never checks for drift
+pass_message: Infrastructure pipelines check for drift
+description: |
+  Manual changes make real infrastructure diverge from code; the next apply
+  then reverts or breaks them unexpectedly.
+remediation: |
+  Schedule terraform plan -detailed-exitcode (or pulumi preview
+  --expect-no-changes) and alert when changes are found.
+query:
+  all:
+    - path: text
+      matches: '\b(terraform|tofu|pulumi|cdk|terragrunt)\s'
+    - not: { path: 'text', matches: '(-detailed-exitcode|driftctl|drift|--expect-no-changes|cdk\s+diff[^\n]*--fail)' }
+---
+id: JENK_PROD_007
+title: Security scanning stage not detected
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: No static analysis (SAST) or secret scanning runs in the pipeline
+pass_message: The pipeline runs SAST / secret scanning
+description: |
+  Injection flaws and committed secrets are merged and deployed unnoticed.
+remediation: |
+  Add SAST (Semgrep, CodeQL, SonarQube security rules, Checkmarx, Fortify)
+  and secret scanning (Gitleaks, TruffleHog).
+enabled: false
+query:
+  not: { path: 'text', matches: '(?i)\b(semgrep|codeql|gitleaks|trufflehog|checkmarx|cxflow|fortify|sourceanalyzer|snyk\s+code|bandit|gosec|brakeman|spotbugs[^\n]*findsecbugs|horusec|veracode)\b' }
+---
+id: JENK_PROD_008
+title: Dependency vulnerability scan not detected
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: Third-party dependencies are not scanned for known vulnerabilities
+pass_message: Dependencies are scanned for vulnerabilities
+description: |
+  Known-vulnerable libraries are shipped without anyone noticing.
+remediation: |
+  Run OWASP Dependency-Check, Snyk, OSV-Scanner, npm audit, pip-audit,
+  govulncheck or Trivy fs and fail on high-severity findings.
+enabled: false
+query:
+  not: { path: 'text', matches: '(?i)(dependencyCheck|dependency-check|snyk\s+test|osv-scanner|npm\s+audit|yarn\s+(npm\s+)?audit|pnpm\s+audit|pip-audit|safety\s+check|govulncheck|cargo\s+audit|bundle(r)?[-\s]audit|trivy\s+(fs|repo)|grype\s+dir:|jf\s+audit|xray|mvn[^\n]*org\.owasp)' }
+---
+id: JENK_PROD_009
+title: Container image scan not detected
+severity: WARNING
+category: security
+target: jenkins
+resource: jenkins
+message: Images are built but not scanned for vulnerabilities
+pass_message: Images are scanned for vulnerabilities
+description: |
+  Vulnerable base images and packages reach production without a check.
+remediation: |
+  Scan images after build (Trivy image, Grype, Docker Scout, Snyk container,
+  Prisma twistcli, Aqua, JFrog Xray) and fail on high-severity findings.
+enabled: false
+query:
+  all:
+    - path: text
+      matches: '\b(docker\s+(build|buildx)|podman\s+build|buildah\s+bud|kaniko|jib\b|pack\s+build)'
+    - not: { path: 'text', matches: '(?i)(trivy\s+(image|i\b)|grype\b|docker\s+scout|snyk\s+container|twistcli|aquasec|anchore|clair|jf\s+(docker\s+)?scan|xray|neuvector|sysdig)' }
+---
+id: JENK_PROD_010
+title: Production readiness validation not detected
+severity: WARNING
+category: operational
+target: jenkins
+resource: jenkins
+message: Production deployments run without pre-deployment checks
+pass_message: Production deploys run preflight checks
+description: |
+  Without a dry run, diff or preflight check, configuration errors are found
+  while changing production.
+remediation: |
+  Add a preflight stage before production (helm diff, kubectl diff,
+  terraform plan, --dry-run=server, readiness checklist / smoke tests in
+  staging).
+query:
+  all:
+    - path: stages[*]
+      where:
+        all:
+          - path: is_deploy
+            equals: true
+          - path: targets_prod
+            equals: true
+    - not: { path: 'text', matches: '(?i)(--dry-run|helm\s+diff|kubectl\s+diff|terraform\s+plan|tofu\s+plan|pulumi\s+preview|preflight|pre-flight|readiness|checklist)' }
