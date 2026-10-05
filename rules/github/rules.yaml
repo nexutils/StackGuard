@@ -1,0 +1,877 @@
+# github actions rules for StackGuard.
+
+id: GHA_SEC_001
+title: Secret is hardcoded in workflow
+severity: ERROR
+category: security
+target: github
+resource: github
+message: A password, token or key is written as a literal value in the workflow
+description: |
+  Workflow files are readable by everyone with repository access (and by the
+  public for public repos); literal secrets are also kept in git history.
+remediation: |
+  Store the value as an Actions secret and reference it with
+  ${{ secrets.NAME }}, then rotate the exposed value.
+query:
+  any:
+    - path: env_entries[*]
+      where:
+        all:
+          - path: key
+            matches: '(?i)(password|passwd|pwd|secret|token|api_?key|private_?key|access_?key|credentials?)'
+          - path: value
+            matches: '\S'
+          - not: { path: 'value', matches: '\$\{\{' }
+    - path: steps[*].with_pairs[*]
+      where:
+        all:
+          - path: "@"
+            matches: '(?i)^[a-z0-9_-]*(password|passwd|secret|token|api[-_]?key|private[-_]?key|access[-_]?key)[a-z0-9_-]*='
+          - path: "@"
+            matches: '=\s*\S'
+          - not: { path: "@", matches: '=\s*\$\{\{' }
+    - path: strings[*]
+      matches: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+---
+id: GHA_SEC_002
+title: Personal access token detected
+severity: ERROR
+category: security
+target: github
+resource: github
+message: A GitHub or other platform access token appears in plaintext
+description: |
+  A leaked personal access token grants the owner's permissions on every
+  repository it can reach; GitHub tokens are scanned for and abused quickly.
+remediation: |
+  Revoke the token, store a fine-grained replacement as a secret, and reference
+  it with ${{ secrets.NAME }}.
+query:
+  path: strings[*]
+  matches: '(gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|glpat-[A-Za-z0-9_-]{20}|xox[abprs]-[A-Za-z0-9-]{10,}|npm_[A-Za-z0-9]{36}|pypi-[A-Za-z0-9_-]{50,}|sk_live_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{32,})'
+---
+id: GHA_SEC_003
+title: Cloud credential detected
+severity: ERROR
+category: security
+target: github
+resource: github
+message: A cloud provider access key or service account key is in plaintext
+description: |
+  Long-lived cloud keys in workflows give anyone with read access control of
+  cloud resources.
+remediation: |
+  Remove the key, rotate it, and authenticate with OIDC (role-to-assume,
+  workload identity, federated credentials).
+query:
+  any:
+    - path: strings[*]
+      matches: '((AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|"type"\s*:\s*"service_account"|AccountKey=[A-Za-z0-9+/=]{40,})'
+    - path: env_entries[*]
+      where:
+        all:
+          - path: key
+            in: [AWS_SECRET_ACCESS_KEY, AWS_ACCESS_KEY_ID, AZURE_CLIENT_SECRET, ARM_CLIENT_SECRET, GOOGLE_CREDENTIALS, GCP_SA_KEY]
+          - path: value
+            matches: '\S'
+          - not: { path: 'value', matches: '\$\{\{' }
+---
+id: GHA_SEC_004
+title: Workflow uses unpinned third-party action
+severity: ERROR
+category: security
+target: github
+resource: github
+message: A third-party action is referenced by tag or branch instead of a commit SHA
+description: |
+  Tags and branches can be moved by the action's owner or an attacker who
+  compromises it (as in the tj-actions/changed-files incident), silently running
+  new code with your secrets.
+remediation: |
+  Pin to a full 40-character commit SHA and keep the version in a comment
+  (uses: owner/action@<sha> # v4.1.2); let Dependabot or Renovate update it.
+query:
+  any:
+    - path: steps[*]
+      where:
+        all:
+          - path: action.kind
+            equals: repo
+          - path: action.owner
+            not_in: [actions, github]
+          - path: action.ref_is_sha
+            equals: false
+    - path: jobs[*]
+      where:
+        all:
+          - path: action.kind
+            equals: repo
+          - path: action.owner
+            not_in: [actions, github]
+          - path: action.ref_is_sha
+            equals: false
+---
+id: GHA_SEC_005
+title: Workflow uses latest action version
+severity: ERROR
+category: security
+target: github
+resource: github
+message: An action or container image is referenced by a moving ref
+description: |
+  Branch refs (main, master), latest, or a missing ref pull whatever is newest
+  at run time, so builds change without any change in your repository.
+remediation: |
+  Reference a release tag or, better, a commit SHA; use versioned image tags
+  with digests for docker:// actions.
+query:
+  any:
+    - path: steps[*]
+      where:
+        any:
+          - all:
+              - path: action.kind
+                equals: repo
+              - any:
+                  - path: action.ref
+                    exists: false
+                  - path: action.ref
+                    in: [main, master, latest, HEAD, dev, develop, trunk]
+          - all:
+              - path: action.kind
+                equals: docker
+              - any:
+                  - path: uses
+                    matches: ':latest(@|$)'
+                  - not: { path: 'uses', matches: '(:[^/:@]+|@sha256:[a-f0-9]{64})$' }
+    - path: jobs[*]
+      where:
+        all:
+          - path: action.kind
+            equals: repo
+          - path: action.ref
+            in: [main, master, latest, HEAD, dev, develop, trunk]
+---
+id: GHA_SEC_006
+title: Excessive GitHub token permissions granted
+severity: WARNING
+category: security
+target: github
+resource: github
+message: GITHUB_TOKEN gets write-all, or write scopes at workflow level
+description: |
+  Every step of every job receives the token; broad write access lets a
+  compromised dependency push code, publish packages or modify releases.
+remediation: |
+  Set permissions: {} or read-only at workflow level and grant the specific
+  write scopes only on the jobs that need them.
+query:
+  any:
+    - path: workflows[*]
+      where:
+        any:
+          - path: permissions
+            equals: write-all
+          - path: 'permissions.*'
+            equals: write
+    - path: jobs[*]
+      where:
+        path: permissions
+        equals: write-all
+---
+id: GHA_SEC_007
+title: permissions block not defined
+severity: WARNING
+category: security
+target: github
+resource: github
+message: The workflow and at least one of its jobs do not declare permissions
+description: |
+  Without a permissions block the token uses the repository default, which is
+  read/write for all scopes on many older repositories and organizations.
+remediation: |
+  Add permissions: contents: read (or {}) at workflow level and widen it per job
+  only where needed.
+query:
+  path: workflows[*]
+  where:
+    all:
+      - path: permissions
+        exists: false
+      - path: 'jobs[*]'
+        where:
+          path: permissions
+          exists: false
+---
+id: GHA_SEC_008
+title: Workflow can be triggered by untrusted input
+severity: WARNING
+category: security
+target: github
+resource: github
+message: Untrusted event data reaches a shell, or a privileged trigger checks out PR code
+description: |
+  ${{ github.event.* }} values such as PR titles and branch names are
+  attacker-controlled and are inserted into scripts before the shell runs
+  (script injection). pull_request_target and workflow_run run with secrets and
+  write access, so building the PR's code there executes attacker code.
+remediation: |
+  Pass event data through env variables and quote them; in pull_request_target /
+  workflow_run workflows never check out or run the PR head.
+query:
+  any:
+    - path: steps[*]
+      where:
+        any:
+          - path: run
+            matches: '\$\{\{\s*(github\.event\.(issue|pull_request|comment|review|review_comment|discussion|discussion_comment|pages|commits|head_commit|workflow_run)[^}]*(title|body|name|label|ref|message|email|default_branch|page_name)|github\.head_ref)[^}]*\}\}'
+          - all:
+              - path: uses
+                matches: '^actions/github-script@'
+              - path: with.script
+                matches: '\$\{\{\s*github\.(event|head_ref)'
+    - path: workflows[*]
+      where:
+        all:
+          - path: triggers
+            contains_any: [pull_request_target, workflow_run]
+          - path: 'jobs[*].steps[*]'
+            where:
+              all:
+                - path: uses
+                  matches: '^actions/checkout@'
+                - path: with.ref
+                  matches: '(github\.event\.pull_request\.head|github\.head_ref|refs/pull/|github\.event\.workflow_run\.head)'
+---
+id: GHA_SEC_009
+title: Secrets may be exposed in logs
+severity: WARNING
+category: security
+target: github
+resource: github
+message: A step prints secrets, dumps the secrets context or traces commands
+description: |
+  GitHub masks exact secret values only; transformed, JSON-encoded or partial
+  values and secrets echoed under set -x can appear in logs.
+remediation: |
+  Never echo secrets or toJSON(secrets); avoid set -x in steps that receive
+  secrets, and mask derived values with ::add-mask::.
+query:
+  path: steps[*]
+  where:
+    any:
+      - path: run
+        matches: '(echo|printf|cat)\b[^\n]*\$\{\{\s*secrets\.'
+      - path: run
+        matches: 'toJSON\(\s*secrets\s*\)'
+      - path: 'env.*'
+        matches: 'toJSON\(\s*secrets\s*\)'
+      - path: 'with.*'
+        matches: 'toJSON\(\s*secrets\s*\)'
+      - all:
+          - path: run
+            matches: '(^|\n)\s*set\s+-[a-z]*x'
+          - any:
+              - path: run
+                matches: '\$\{\{\s*secrets\.'
+              - path: 'env.*'
+                matches: '\$\{\{\s*secrets\.'
+---
+id: GHA_SEC_010
+title: Remote script executed without verification
+severity: ERROR
+category: security
+target: github
+resource: github
+message: A downloaded script or binary is executed without a checksum check
+description: |
+  Code fetched at run time executes with the job's token and secrets; a
+  compromised download server compromises the pipeline.
+remediation: |
+  Verify a pinned checksum or signature before execution, or use a pinned
+  action / package instead.
+query:
+  path: steps[*]
+  where:
+    any:
+      - all:
+          - path: run
+            matches: '\b(curl|wget)\b[^\n]*\s(-o|-O|--output)\s*\S+'
+          - path: run
+            matches: '(\b(ba|z|da)?sh\s+\S+|chmod\s+\+x|\./\S+)'
+          - not: { path: 'run', matches: '(sha256sum|sha512sum|shasum|gpg\s+--verify|gpgv|cosign\s+verify|minisign|slsa-verifier)' }
+      - path: run
+        matches: '<\(\s*(curl|wget)\b'
+---
+id: GHA_SEC_011
+title: curl | bash pattern detected
+severity: ERROR
+category: security
+target: github
+resource: github
+message: Remote content is piped straight into a shell or interpreter
+description: |
+  curl | bash runs unverified code with the job's credentials, and a dropped
+  connection can execute a truncated script.
+remediation: |
+  Download, verify a checksum, then execute, or use a pinned setup action.
+query:
+  path: steps[*]
+  where:
+    path: run
+    matches: '\b(curl|wget)\b[^;&\n]*\|\s*(sudo\s+)?(-E\s+)?((ba|z|da)?sh|python3?|perl|node)\b'
+---
+id: GHA_SEC_012
+title: Dependency integrity verification missing
+severity: WARNING
+category: security
+target: github
+resource: github
+message: Dependencies are installed without enforcing the lockfile
+description: |
+  npm install, plain yarn / pnpm install and pip without hashes can resolve
+  different (possibly malicious) versions than the ones that were reviewed.
+remediation: |
+  Use npm ci, yarn install --frozen-lockfile / --immutable, pnpm install
+  --frozen-lockfile, pip install --require-hashes, uv sync --locked.
+query:
+  path: steps[*]
+  where:
+    any:
+      - all:
+          - path: run
+            matches: '\bnpm\s+(install|i)\b'
+          - not: { path: 'run', matches: '\bnpm\s+(install|i)\s+(-g|--global)' }
+      - all:
+          - path: run
+            matches: '\byarn(\s+install)?(\s*$|\s*\n)'
+          - not: { path: 'run', matches: '--(frozen-lockfile|immutable)' }
+      - all:
+          - path: run
+            matches: '\bpnpm\s+(install|i)\b'
+          - not: { path: 'run', matches: '--frozen-lockfile' }
+      - all:
+          - path: run
+            matches: '\bpip3?\s+install\s+(-r|--requirement)\s+\S+'
+          - not: { path: 'run', matches: '--require-hashes' }
+      - all:
+          - path: run
+            matches: '\buv\s+sync\b'
+          - not: { path: 'run', matches: '--(locked|frozen)' }
+---
+id: GHA_SEC_013
+title: Workflow runs with elevated privileges
+severity: WARNING
+category: security
+target: github
+resource: github
+message: A job runs privileged containers, or self-hosted runners serve pull requests
+description: |
+  Privileged containers can take over the runner host. Self-hosted runners that
+  run pull_request workflows execute untrusted code on persistent
+  infrastructure inside your network.
+remediation: |
+  Avoid --privileged; use ephemeral, isolated self-hosted runners and never
+  attach them to workflows triggered by forks.
+query:
+  any:
+    - path: jobs[*]
+      where:
+        any:
+          - path: container.options
+            matches: '--privileged'
+          - path: 'services.*.options'
+            matches: '--privileged'
+          - all:
+              - path: runs_on
+                matches: '(?i)self-hosted'
+              - path: workflow.triggers
+                contains_any: [pull_request, pull_request_target, issue_comment]
+    - path: steps[*]
+      where:
+        path: run
+        matches: '\bdocker\s+run\b[^\n]*--privileged'
+---
+id: GHA_SEC_014
+title: Artifact may contain sensitive data
+severity: WARNING
+category: security
+target: github
+resource: github
+message: An artifact uploads the whole workspace, hidden files or secret files
+description: |
+  actions/checkout stores the token in .git/config by default; uploading the
+  workspace root, hidden files or key / env files publishes them to anyone who
+  can download artifacts.
+remediation: |
+  Upload only specific build output paths, keep include-hidden-files false, and
+  set persist-credentials: false on actions/checkout.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: uses
+        matches: '^actions/upload-artifact@'
+      - any:
+          - path: with.path
+            matches: '(?m)^\s*(\.|\./|\*|\*\*|\$\{\{\s*github\.workspace\s*\}\}/?)\s*$'
+          - path: with.path
+            matches: '(?i)(\.env\b|\.git(/|$)|\.pem$|\.key$|id_rsa|\.aws|\.kube|\.npmrc|credentials)'
+          - path: 'with["include-hidden-files"]'
+            equals: true
+---
+id: GHA_SEC_015
+title: Security scanning stage not detected
+severity: WARNING
+category: security
+target: github
+resource: github
+# The scanner list is organisation-specific; off by default.
+enabled: false
+message: No static analysis (SAST) or secret scanning runs in any workflow
+description: |
+  Without code and secret scanning, injection flaws and leaked credentials are
+  merged and deployed unnoticed.
+remediation: |
+  Add CodeQL or Semgrep for SAST and Gitleaks / TruffleHog for secrets (and
+  zizmor or actionlint for workflow security).
+query:
+  all:
+    - not: { path: 'context.uses[*]', matches: '(?i)(github/codeql-action|semgrep|sonarsource|gitleaks|trufflesecurity|zizmor|snyk/actions/(node|python|golang|code))' }
+    - not: { path: 'context.runs[*]', matches: '(?i)\b(semgrep|gitleaks|trufflehog|codeql|zizmor|bandit|gosec|brakeman|snyk\s+code)\b' }
+---
+id: GHA_PIPE_001
+title: Workflow timeout not configured
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: The job has no timeout-minutes
+description: |
+  The default job timeout is 360 minutes; a hung step blocks runners and burns
+  minutes for six hours before failing.
+remediation: |
+  Set timeout-minutes on every job slightly above the normal run time.
+query:
+  path: jobs[*]
+  where:
+    all:
+      - path: uses
+        exists: false
+      - path: timeout_minutes
+        exists: false
+---
+id: GHA_PIPE_002
+title: Concurrency control not configured
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: Neither the workflow nor its jobs define a concurrency group
+description: |
+  Without concurrency, two deployments can run at the same time and overwrite
+  each other, and superseded PR builds keep consuming runners.
+remediation: |
+  Add a concurrency group with cancel-in-progress for CI, and a non-cancelling
+  group per environment for deployments.
+query:
+  path: workflows[*]
+  where:
+    all:
+      - path: concurrency
+        exists: false
+      - not: { path: 'jobs[*].concurrency', exists: true }
+---
+id: GHA_PIPE_003
+title: Retry strategy not configured
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: A network-dependent step has no retry
+description: |
+  Registry pushes, cloud CLI calls and downloads fail on transient errors,
+  failing the whole run or leaving a deployment half done.
+remediation: |
+  Wrap the command in a retry loop or use a retry action, and use built-in retry
+  flags (curl --retry) where available.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: run
+        matches: '\b(curl|wget|docker\s+push|npm\s+publish|twine\s+upload|kubectl\s+apply|helm\s+(upgrade|install)|terraform\s+apply|aws\s|gcloud\s|az\s)'
+      - not: { path: 'run', matches: '(--retry|retry|until\s|for\s+\w+\s+in\s+(\{|\$\(seq|1\s+2))' }
+      - not: { path: 'uses', matches: '(?i)retry' }
+---
+id: GHA_PIPE_004
+title: Failure notification not configured
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: A deployment or scheduled workflow does not notify anyone on failure
+description: |
+  Failures on main, scheduled jobs and deployments only show up in the Actions
+  tab, where nobody is looking.
+remediation: |
+  Add a step or job with if: failure() that notifies Slack / Teams / PagerDuty.
+query:
+  path: workflows[*]
+  where:
+    all:
+      - any:
+          - path: triggers
+            contains_any: [push, schedule, release, workflow_dispatch]
+          - path: 'jobs[*].is_deploy'
+            equals: true
+      - not: { path: 'jobs[*].if', matches: 'failure\(\)' }
+      - not: { path: 'jobs[*].steps[*].if', matches: 'failure\(\)' }
+---
+id: GHA_PIPE_005
+title: Cleanup step missing
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: A job leaves credentials or files behind on a persistent runner
+description: |
+  Self-hosted runners keep the workspace and home directory between jobs, so
+  checked-out code, docker logins and cloud credentials leak into later jobs.
+remediation: |
+  Use ephemeral runners, or add an if: always() step that removes the workspace
+  and runs docker logout / credential cleanup.
+query:
+  path: jobs[*]
+  where:
+    any:
+      - all:
+          - path: runs_on
+            matches: '(?i)self-hosted'
+          - not: { path: 'steps[*].if', matches: 'always\(\)' }
+      - all:
+          - path: 'steps[*].run'
+            matches: '\bdocker\s+login\b'
+          - not: { path: 'steps[*].run', matches: '\bdocker\s+logout\b' }
+          - path: runs_on
+            matches: '(?i)self-hosted'
+---
+id: GHA_PIPE_006
+title: Environment protection not configured
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: A deployment job does not use a GitHub environment
+description: |
+  Without environment:, deployment secrets are available to every branch and no
+  protection rules (reviewers, branch restrictions, wait timers) apply.
+remediation: |
+  Add environment: <name> to the job and move deployment secrets to that
+  environment.
+query:
+  path: jobs[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - path: environment
+        exists: false
+---
+id: GHA_PIPE_008
+title: Production deployment lacks approval
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: A production deployment runs without an approval gate
+description: |
+  Production changes go out without a human check, and anyone who can push to
+  the branch can deploy.
+remediation: |
+  Deploy production through an environment with required reviewers and a
+  deployment branch policy.
+query:
+  path: jobs[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - any:
+          - path: environment.name
+            matches: '(?i)prod'
+          - path: id
+            matches: '(?i)prod'
+          - path: name
+            matches: '(?i)prod'
+      - path: environment
+        exists: false
+---
+id: GHA_PIPE_009
+title: Deployment validation step missing
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: A deployment job does not verify the deployment
+description: |
+  Without a smoke test or rollout check, a broken release is reported as a
+  successful run.
+remediation: |
+  Add kubectl rollout status, helm --wait, or a smoke test / health check
+  request after deploying.
+query:
+  path: jobs[*]
+  where:
+    all:
+      - path: is_deploy
+        equals: true
+      - not: { path: 'steps[*].run', matches: '(?i)(rollout\s+status|helm\s+(upgrade|install)[^\n]*--(wait|atomic)|helm\s+test|smoke|health|readyz|healthz|wait-for|curl[^\n]*--fail)' }
+      - not: { path: 'steps[*].uses', matches: '(?i)(smoke|health|wait-for)' }
+      - not: { path: 'steps[*].name', matches: '(?i)(smoke|health|verify|validat)' }
+---
+id: GHA_PIPE_010
+title: Rollback strategy not detected
+severity: WARNING
+category: reliability
+target: github
+resource: github
+message: A workflow deploys but has no rollback mechanism
+description: |
+  When a release fails there is no scripted way back to the previous version.
+remediation: |
+  Use helm --atomic or a failure() step running helm rollback / kubectl rollout
+  undo, or a workflow_dispatch rollback workflow.
+query:
+  all:
+    - path: workflows[*]
+      where:
+        all:
+          - path: 'jobs[*].is_deploy'
+            equals: true
+          - not: { path: 'jobs[*].steps[*].run', matches: '(?i)(rollback|rollout\s+undo|--atomic|revert)' }
+          - not: { path: 'jobs[*].steps[*].name', matches: '(?i)(rollback|revert)' }
+    - not:
+        path: 'context.files[*]'
+        matches: '(?i)\.github/workflows/[^/]*rollback[^/]*\.ya?ml$'
+---
+id: GHA_BUILD_001
+title: Build tool version not pinned
+severity: WARNING
+category: maintainability
+target: github
+resource: github
+message: A setup action installs a floating or default tool version
+description: |
+  Without an explicit version (or with latest / lts/* / 3.x), the toolchain
+  changes underneath the build when new releases come out.
+remediation: |
+  Set an exact version, or a version file committed to the repo.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: uses
+        matches: '^(actions/setup-(node|python|java|go|dotnet)|ruby/setup-ruby|hashicorp/setup-terraform|azure/setup-(helm|kubectl)|gradle/actions/setup-gradle|pnpm/action-setup|oven-sh/setup-bun|denoland/setup-deno)@'
+      - any:
+          - not: { path: 'with_pairs[*]', matches: '(?i)^([a-z]+[-_])?version(-file)?=' }
+          - path: 'with_pairs[*]'
+            matches: '(?i)^([a-z]+[-_])?version=(latest|lts/\*|node|current|stable|\*|[0-9]+(\.[0-9]+)?\.x)$'
+---
+id: GHA_BUILD_002
+title: Dependency versions not pinned
+severity: WARNING
+category: maintainability
+target: github
+resource: github
+message: A tool or package is installed without a version
+description: |
+  Ad-hoc installs in run steps pull the newest release on every run, making
+  builds non-reproducible and exposed to malicious releases.
+remediation: |
+  Pin versions (pip install x==1.2.3, npm i -g x@1.2.3, go install x@v1.2.3,
+  cargo install x --version 1.2.3).
+query:
+  path: steps[*]
+  where:
+    any:
+      - all:
+          - path: run
+            matches: '\bpip3?\s+install\s+[A-Za-z]'
+          - not: { path: 'run', matches: '\bpip3?\s+install\s+(-r|--requirement|-e|\.)' }
+          - not: { path: 'run', matches: '==' }
+      - path: run
+        matches: '\bnpm\s+(install|i)\s+(-g|--global)\s+(@[a-z0-9-]+/)?[a-z0-9._-]+(\s|$)'
+      - path: run
+        matches: '\bgo\s+install\s+\S+@latest\b'
+      - all:
+          - path: run
+            matches: '\bcargo\s+install\s+\S'
+          - not: { path: 'run', matches: '--version' }
+      - all:
+          - path: run
+            matches: '\bgem\s+install\s+\S'
+          - not: { path: 'run', matches: '(-v|--version)' }
+---
+id: GHA_BUILD_003
+title: Build is not reproducible
+severity: WARNING
+category: maintainability
+target: github
+resource: github
+message: The job uses a floating runner image or upgrades packages at build time
+description: |
+  *-latest runner labels move to new OS versions, and package upgrades or
+  :latest container images change the build environment between runs.
+remediation: |
+  Use versioned runner labels (ubuntu-24.04), pinned container images, and avoid
+  apt-get upgrade in builds.
+query:
+  any:
+    - path: jobs[*]
+      where:
+        any:
+          - path: runs_on
+            matches: '-latest(,|$)'
+          - path: container.image
+            matches: ':latest(@|$)'
+          - path: container
+            matches: ':latest(@|$)'
+    - path: steps[*]
+      where:
+        path: run
+        matches: '\b(apt(-get)?\s+(-\S+\s+)*(upgrade|dist-upgrade|full-upgrade)|brew\s+upgrade|(yum|dnf)\s+(-\S+\s+)*(update|upgrade))\b'
+---
+id: GHA_BUILD_004
+title: Cache strategy not configured
+severity: WARNING
+category: maintainability
+target: github
+resource: github
+message: A job installs dependencies without caching them
+description: |
+  Downloading every dependency on every run slows builds and increases exposure
+  to registry outages and rate limits.
+remediation: |
+  Enable the cache input of the setup action (cache: npm / pip / gradle) or add
+  actions/cache keyed on the lockfile hash.
+query:
+  path: jobs[*]
+  where:
+    all:
+      - path: 'steps[*].run'
+        matches: '\b(npm\s+(ci|install)|yarn(\s+install)?|pnpm\s+install|pip3?\s+install|poetry\s+install|uv\s+sync|mvn\s|gradle(w)?\s|go\s+(build|mod\s+download)|bundle\s+install|composer\s+install|cargo\s+build)'
+      - not: { path: 'steps[*].uses', matches: '^actions/cache(/restore)?@' }
+      - not: { path: 'steps[*].with_pairs[*]', matches: '^cache=' }
+      - not: { path: 'steps[*].uses', matches: '^(gradle/actions/setup-gradle|Swatinem/rust-cache|astral-sh/setup-uv)@' }
+---
+id: GHA_BUILD_005
+title: Artifact retention policy not configured
+severity: WARNING
+category: maintainability
+target: github
+resource: github
+message: An artifact is uploaded without retention-days
+description: |
+  Artifacts are kept for the repository default (90 days unless changed),
+  increasing storage cost and the window in which leaked data stays
+  downloadable.
+remediation: |
+  Set retention-days on actions/upload-artifact to what you actually need.
+query:
+  path: steps[*]
+  where:
+    all:
+      - path: uses
+        matches: '^actions/upload-artifact@'
+      - path: 'with["retention-days"]'
+        exists: false
+---
+id: GHA_TEST_001
+title: Test stage missing
+severity: WARNING
+category: operational
+target: github
+resource: github
+message: No workflow runs automated tests
+description: |
+  Without tests in CI, regressions are only found after merge or deployment.
+remediation: |
+  Run the test suite on pull_request and push to the default branch.
+query:
+  all:
+    - not: { path: 'context.runs[*]', matches: '(?i)\b(npm\s+(run\s+)?test|yarn\s+test|pnpm\s+test|pytest|python\s+-m\s+(pytest|unittest)|tox|nox|go\s+test|mvn\s+(-\S+\s+)*(test|verify)|gradle(w)?\s+(test|check|build)|\./gradlew\s+(test|check|build)|cargo\s+test|dotnet\s+test|rspec|phpunit|jest|vitest|mocha|make\s+test|bundle\s+exec\s+rake)\b' }
+    - not: { path: 'context.step_names[*]', matches: '(?i)\btests?\b' }
+---
+id: GHA_TEST_002
+title: Coverage reporting missing
+severity: WARNING
+category: operational
+target: github
+resource: github
+message: Test coverage is not collected or reported
+description: |
+  Without coverage data, untested code paths are invisible in review.
+remediation: |
+  Generate coverage and upload it (Codecov, Coveralls, SonarQube) or publish it
+  as a PR comment.
+query:
+  all:
+    - not: { path: 'context.runs[*]', matches: '(?i)(--coverage|--cov\b|coverage\s+(run|report|xml)|jacoco|lcov|-coverprofile|nyc\b|c8\b|tarpaulin|llvm-cov|kover)' }
+    - not: { path: 'context.uses[*]', matches: '(?i)(codecov|coveralls|sonarsource|coverage)' }
+---
+id: GHA_TEST_003
+title: Quality gate validation missing
+severity: WARNING
+category: operational
+target: github
+resource: github
+message: No linting or code quality gate runs in CI
+description: |
+  Without a quality gate, style issues, bugs caught by linters and
+  maintainability regressions reach the main branch.
+remediation: |
+  Run linters (ESLint, Ruff, golangci-lint, Checkstyle...) and, if used, a
+  SonarQube quality gate that fails the build.
+query:
+  all:
+    - not: { path: 'context.uses[*]', matches: '(?i)(sonarsource|sonarqube-quality-gate|codeclimate|qodana|golangci-lint-action|super-linter|reviewdog|pre-commit/action|actionlint)' }
+    - not: { path: 'context.runs[*]', matches: '(?i)\b(eslint|ruff|flake8|pylint|mypy|golangci-lint|checkstyle|spotbugs|pmd|ktlint|rubocop|phpstan|psalm|clippy|sonar-scanner|pre-commit|npm\s+run\s+lint|yarn\s+lint|pnpm\s+lint|make\s+lint|actionlint)\b' }
+---
+id: GHA_TEST_004
+title: Security scan stage missing
+severity: WARNING
+category: operational
+target: github
+resource: github
+message: Container images and infrastructure code are not scanned
+description: |
+  Vulnerable base images and misconfigured Dockerfiles, Kubernetes manifests or
+  Terraform reach production without a check.
+remediation: |
+  Scan images (Trivy, Grype, Docker Scout) and IaC (Checkov, KICS, Trivy config)
+  in the pipeline and fail on high-severity findings.
+query:
+  all:
+    - not: { path: 'context.uses[*]', matches: '(?i)(aquasecurity/trivy-action|anchore/(scan-action|sbom-action)|docker/scout-action|bridgecrewio/checkov-action|checkmarx/kics-github-action|aquasecurity/tfsec|snyk/actions/(docker|iac)|hadolint/hadolint-action)' }
+    - not: { path: 'context.runs[*]', matches: '(?i)\b(trivy|grype|docker\s+scout|checkov|kics|tfsec|terrascan|hadolint|kubescape|snyk\s+(container|iac))\b' }
+---
+id: GHA_TEST_005
+title: Dependency vulnerability scan missing
+severity: WARNING
+category: operational
+target: github
+resource: github
+message: Third-party dependencies are not scanned for known vulnerabilities
+description: |
+  Known-vulnerable libraries are merged and shipped without anyone noticing.
+remediation: |
+  Add actions/dependency-review-action on pull requests, a scanner such as
+  OSV-Scanner / npm audit / govulncheck, and Dependabot security updates.
+query:
+  all:
+    - not: { path: 'context.uses[*]', matches: '(?i)(actions/dependency-review-action|google/osv-scanner|snyk/actions/(node|python|golang|maven|gradle)|dependency-check)' }
+    - not: { path: 'context.runs[*]', matches: '(?i)\b(npm\s+audit|yarn\s+(npm\s+)?audit|pnpm\s+audit|pip-audit|safety\s+check|govulncheck|cargo\s+audit|bundle(r)?[-\s]audit|osv-scanner|dependency-check|composer\s+audit|dotnet\s+list\s+package\s+--vulnerable)\b' }
+    - path: context.dependabot
+      exists: false
