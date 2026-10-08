@@ -36,10 +36,31 @@ func TestResolve(t *testing.T) {
 		}
 	}
 
+	// Profile parsing.
+	for _, tc := range []struct {
+		input string
+		want  models.Profile
+	}{
+		{"", models.ProfileStandard},
+		{"quick", models.ProfileQuick},
+		{"strict", models.ProfileStrict},
+	} {
+		r, err := Config{Profile: tc.input}.Resolve()
+		if err != nil {
+			t.Errorf("profile %q: %v", tc.input, err)
+		} else if r.Profile != tc.want {
+			t.Errorf("profile %q = %v, want %v", tc.input, r.Profile, tc.want)
+		}
+	}
+	if _, err := (Config{Profile: "turbo"}).Resolve(); err == nil {
+		t.Error("expected error for unknown profile")
+	}
+
 	bad := []Config{
 		{FailOn: "fatal"},
 		{SeverityOverrides: map[string]string{"X_SEC_001": "loud"}},
 		{MinScore: 101},
+		{Profile: "turbo"},
 	}
 	for _, c := range bad {
 		if _, err := c.Resolve(); err == nil {

@@ -48,6 +48,7 @@ exits with code 1 when the score is lower.`,
 		},
 	}
 	sf.register(cmd)
+	cmd.Flags().StringP("profile", "p", "", "scan profile: quick, standard or strict (default \"standard\")")
 	cmd.Flags().StringVarP(&format, "format", "f", "console", "output format: console or json")
 	return cmd
 }

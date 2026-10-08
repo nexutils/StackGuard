@@ -43,6 +43,7 @@ var scanBindings = []flagBinding{
 	{key: "min_score", flag: "min-score"},
 	{key: "fail_on", flag: "fail-on"},
 	{key: "format", flag: "format"},
+	{key: "profile", flag: "profile"},
 }
 
 func newScanCommand(a *app) *cobra.Command {
@@ -72,6 +73,7 @@ func newScanCommand(a *app) *cobra.Command {
 		},
 	}
 	sf.register(cmd)
+	cmd.Flags().StringP("profile", "p", "", "scan profile: quick, standard or strict (default \"standard\")")
 	cmd.Flags().StringP("format", "f", "", "output format: "+strings.Join(reporterall.Formats(), ", ")+" (default \"console\")")
 	cmd.Flags().String("fail-on", "", "minimum severity that fails the scan: error, warning, info or none (default \"error\")")
 	cmd.Flags().StringVarP(&output, "output", "o", "", "write the report to a file instead of stdout")
@@ -114,6 +116,7 @@ func (a *app) runScan(cmd *cobra.Command, sf *scanFlags, paths []string, interac
 	enabled := append(append([]string{}, cfg.EnabledRules...), upper(sf.enable)...)
 	e, err := engine.New(set.All(), engine.Options{
 		Targets:           cfg.Targets,
+		Profile:           cfg.Profile,
 		DisabledRules:     disabled,
 		EnabledRules:      enabled,
 		SeverityOverrides: cfg.SeverityOverrides,

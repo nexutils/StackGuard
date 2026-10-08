@@ -32,6 +32,8 @@ type Options struct {
 	Parsers *parser.Registry
 	// Targets restricts scanning to these targets; empty means all.
 	Targets []string
+	// Profile controls which rules are evaluated by severity and category.
+	Profile models.Profile
 	// DisabledRules are rule IDs to skip.
 	DisabledRules []string
 	// EnabledRules turns on rules that are off by default. DisabledRules
@@ -99,8 +101,15 @@ func New(rules []*models.Rule, opts Options) (*Engine, error) {
 	for _, id := range opts.EnabledRules {
 		enabled[strings.ToUpper(id)] = true
 	}
+	prof := opts.Profile
 	for _, r := range rules {
-		if disabled[r.ID] || (r.OffByDefault && !enabled[r.ID]) || !e.targetEnabled(r.Target) {
+		if disabled[r.ID] || !e.targetEnabled(r.Target) {
+			continue
+		}
+		if r.OffByDefault && !enabled[r.ID] && !prof.EnableOffByDefault() {
+			continue
+		}
+		if !enabled[r.ID] && (r.Severity < prof.MinSeverity() || !prof.CategoryAllowed(r.Category)) {
 			continue
 		}
 		if sev, ok := opts.SeverityOverrides[r.ID]; ok && sev != r.Severity {
