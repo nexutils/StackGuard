@@ -83,6 +83,22 @@ var workloadKinds = map[string]bool{
 	"ReplicaSet": true, "ReplicationController": true, "Job": true, "CronJob": true,
 }
 
+// Model builds the property model for a set of manifests held in memory. The
+// helm parser uses it to expose a rendered chart under `rendered.*`, so Helm
+// rules can reuse exactly the Kubernetes model (including the derived fields
+// such as containers[*].sc and workloads[*].has_pdb).
+func Model(content []byte) (map[string]any, error) {
+	objs, err := decodeObjects(content, "")
+	if err != nil {
+		return nil, err
+	}
+	res := build(parser.Source{}, objs, objs)
+	if len(res) == 0 {
+		return nil, nil
+	}
+	return res[0].Properties, nil
+}
+
 // build assembles the resource for one manifest file. own are this file's
 // objects; all adds the sibling manifests for cross-object lookups.
 func build(src parser.Source, own, all []object) []models.Resource {
