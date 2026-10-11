@@ -1,0 +1,5 @@
+services:
+  a:
+    image: postgres:16.3.2
+  b:
+    image: postgres:16@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa

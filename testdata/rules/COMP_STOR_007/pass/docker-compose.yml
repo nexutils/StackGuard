@@ -1,0 +1,9 @@
+services:
+  a:
+    image: x:1
+    volumes: ["data:/data"]
+  b:
+    image: x:1
+    volumes: ["data:/data:ro"]
+volumes:
+  data: {}

@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    environment: ["STRIPE_API_KEY=abc123"]

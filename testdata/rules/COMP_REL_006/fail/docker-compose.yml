@@ -1,0 +1,6 @@
+services:
+  app:
+    image: x:1
+    depends_on: [db]
+  db:
+    image: y:1

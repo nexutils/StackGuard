@@ -1,0 +1,10 @@
+services:
+  a:
+    image: x:1
+    restart: on-failure:3
+  b:
+    image: x:1
+    deploy:
+      restart_policy:
+        condition: on-failure
+        max_attempts: 5

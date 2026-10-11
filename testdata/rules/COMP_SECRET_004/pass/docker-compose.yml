@@ -1,0 +1,5 @@
+services:
+  app:
+    image: x:1
+    environment:
+      CONFIG: /etc/app/config/production/settings/defaults.yaml

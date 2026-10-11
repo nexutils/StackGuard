@@ -1,0 +1,4 @@
+services:
+  app:
+    image: postgres:16.3.2
+    ports: ["127.0.0.1:15432:5432"]

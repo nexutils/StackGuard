@@ -1,0 +1,6 @@
+services:
+  app:
+    image: x:1
+    volumes: ["data:/data"]
+volumes:
+  old: {}

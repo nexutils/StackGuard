@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    ports: ["127.0.0.1:9229:9229"]

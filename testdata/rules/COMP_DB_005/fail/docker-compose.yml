@@ -1,0 +1,4 @@
+services:
+  app:
+    image: elasticsearch:8.14.1
+    ports: ["15432:5432"]

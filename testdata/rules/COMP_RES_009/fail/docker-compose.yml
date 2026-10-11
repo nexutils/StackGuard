@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    oom_score_adj: -500

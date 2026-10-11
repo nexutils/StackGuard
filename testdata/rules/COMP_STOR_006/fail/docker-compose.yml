@@ -1,0 +1,7 @@
+services:
+  app:
+    image: x:1
+volumes:
+  data:
+    labels:
+      tier: critical

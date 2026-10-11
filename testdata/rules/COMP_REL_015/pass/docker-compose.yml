@@ -1,0 +1,13 @@
+services:
+  app:
+    image: x:1
+    depends_on: [db]
+  db:
+    image: y:1
+  tools:
+    image: t:1
+    profiles: [debug]
+    depends_on: [helper]
+  helper:
+    image: h:1
+    profiles: [debug]

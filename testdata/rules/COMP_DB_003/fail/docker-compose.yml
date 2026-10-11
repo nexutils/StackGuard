@@ -1,0 +1,4 @@
+services:
+  app:
+    image: redis:7.2.5
+    ports: ["15432:5432"]

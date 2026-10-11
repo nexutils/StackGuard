@@ -1,0 +1,4 @@
+services:
+  app:
+    image: mysql:8.4.0
+    ports: ["15432:5432"]

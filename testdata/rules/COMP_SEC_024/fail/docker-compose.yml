@@ -1,0 +1,5 @@
+services:
+  app:
+    image: x:1
+    sysctls:
+      net.ipv4.ip_forward: 1

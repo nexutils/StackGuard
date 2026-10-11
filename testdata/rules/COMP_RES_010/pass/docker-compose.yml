@@ -1,0 +1,11 @@
+services:
+  app:
+    image: x:1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1"
+        reservations:
+          memory: 256M
+          cpus: "0.5"

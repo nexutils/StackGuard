@@ -1,0 +1,4 @@
+services:
+  app:
+    image: docker:26-dind
+    ports: ["2375:2375"]

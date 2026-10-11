@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    cap_add: [NET_RAW, CAP_NET_BIND_SERVICE]

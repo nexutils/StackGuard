@@ -1,0 +1,8 @@
+services:
+  app:
+    image: x:1
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:?required}
+      DB_PASSWORD_FILE: /run/secrets/db
+      DATABASE_URL: postgres://app:${DB_PASSWORD}@db/app
+      EMPTY_PASSWORD:

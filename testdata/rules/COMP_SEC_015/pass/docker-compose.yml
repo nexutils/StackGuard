@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    volumes: ["/opt/app/config:/config:ro", "/etcetera:/x"]

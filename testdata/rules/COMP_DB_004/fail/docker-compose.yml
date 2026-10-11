@@ -1,0 +1,4 @@
+services:
+  app:
+    image: mongo:7.0.11
+    ports: ["15432:5432"]
