@@ -1,0 +1,10 @@
+pipeline {
+    agent { label 'linux' }
+    stages {
+        stage('Build') {
+            steps {
+                sh 'deploy --token=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+            }
+        }
+    }
+}

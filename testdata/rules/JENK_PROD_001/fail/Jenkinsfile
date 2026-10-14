@@ -1,0 +1,13 @@
+pipeline {
+    agent { label 'linux' }
+    environment {
+        API_URL = 'https://api.example.com'
+    }
+    stages {
+        stage('Build') {
+            steps {
+                sh 'make'
+            }
+        }
+    }
+}

@@ -1,0 +1,10 @@
+pipeline {
+    agent { label 'linux' }
+    stages {
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+            }
+        }
+    }
+}
