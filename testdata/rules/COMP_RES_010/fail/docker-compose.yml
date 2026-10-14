@@ -1,0 +1,9 @@
+services:
+  app:
+    image: x:1
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 1G

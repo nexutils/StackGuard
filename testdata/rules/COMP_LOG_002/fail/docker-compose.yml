@@ -1,0 +1,6 @@
+services:
+  app:
+    image: x:1
+    logging:
+      options:
+        max-size: 10m

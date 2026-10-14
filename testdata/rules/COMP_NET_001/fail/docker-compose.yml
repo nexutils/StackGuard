@@ -1,0 +1,4 @@
+services:
+  app:
+    image: acme/app:1
+    ports: ["5432:5432"]

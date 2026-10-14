@@ -1,0 +1,257 @@
+[
+  {
+    "target": "kubernetes",
+    "type": "kubernetes",
+    "name": "manifests.yaml",
+    "file": "kubernetes/manifests.yaml",
+    "line": 1,
+    "properties": {
+      "configmaps": [
+        {
+          "apiVersion": "v1",
+          "data": {
+            "key": "value"
+          },
+          "data_keys": [
+            "key"
+          ],
+          "kind": "ConfigMap",
+          "metadata": {
+            "name": "settings"
+          }
+        }
+      ],
+      "containers": [
+        {
+          "image": "nginx:1.25",
+          "name": "web",
+          "sc": {},
+          "type": "container",
+          "workload": {
+            "kind": "Deployment",
+            "name": "web",
+            "namespace": "prod"
+          },
+          "workload_pod": {
+            "containers": [
+              {
+                "image": "nginx:1.25",
+                "name": "web"
+              }
+            ]
+          }
+        },
+        {
+          "image": "busybox:1.36",
+          "name": "job",
+          "sc": {},
+          "type": "container",
+          "workload": {
+            "kind": "CronJob",
+            "name": "nightly"
+          },
+          "workload_pod": {
+            "containers": [
+              {
+                "image": "busybox:1.36",
+                "name": "job"
+              }
+            ]
+          }
+        }
+      ],
+      "namespaces": [
+        {
+          "declared": false,
+          "has_default_deny_ingress": false,
+          "has_limit_range": false,
+          "has_resource_quota": false,
+          "name": "prod"
+        }
+      ],
+      "resources": [
+        {
+          "apiVersion": "apps/v1",
+          "kind": "Deployment",
+          "metadata": {
+            "name": "web",
+            "namespace": "prod"
+          },
+          "spec": {
+            "replicas": 2,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "image": "nginx:1.25",
+                    "name": "web"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "apiVersion": "batch/v1",
+          "kind": "CronJob",
+          "metadata": {
+            "name": "nightly"
+          },
+          "spec": {
+            "jobTemplate": {
+              "spec": {
+                "template": {
+                  "spec": {
+                    "containers": [
+                      {
+                        "image": "busybox:1.36",
+                        "name": "job"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "schedule": "0 0 * * *"
+          }
+        },
+        {
+          "apiVersion": "v1",
+          "data": {
+            "key": "value"
+          },
+          "kind": "ConfigMap",
+          "metadata": {
+            "name": "settings"
+          }
+        }
+      ],
+      "strings": [
+        "apps/v1",
+        "Deployment",
+        "web",
+        "prod",
+        "nginx:1.25",
+        "web",
+        "batch/v1",
+        "CronJob",
+        "nightly",
+        "busybox:1.36",
+        "job",
+        "0 0 * * *",
+        "v1",
+        "value",
+        "ConfigMap",
+        "settings"
+      ],
+      "workloads": [
+        {
+          "apiVersion": "apps/v1",
+          "automount_token": true,
+          "has_hpa": false,
+          "has_pdb": false,
+          "kind": "Deployment",
+          "metadata": {
+            "name": "web",
+            "namespace": "prod"
+          },
+          "monitor_selected": false,
+          "network_policy_selected": false,
+          "pod": {
+            "containers": [
+              {
+                "image": "nginx:1.25",
+                "name": "web"
+              }
+            ]
+          },
+          "spec": {
+            "replicas": 2,
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "image": "nginx:1.25",
+                    "name": "web"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "apiVersion": "batch/v1",
+          "automount_token": true,
+          "has_hpa": false,
+          "has_pdb": false,
+          "job": {
+            "template": {
+              "spec": {
+                "containers": [
+                  {
+                    "image": "busybox:1.36",
+                    "name": "job"
+                  }
+                ]
+              }
+            }
+          },
+          "kind": "CronJob",
+          "metadata": {
+            "name": "nightly"
+          },
+          "monitor_selected": false,
+          "network_policy_selected": false,
+          "pod": {
+            "containers": [
+              {
+                "image": "busybox:1.36",
+                "name": "job"
+              }
+            ]
+          },
+          "spec": {
+            "jobTemplate": {
+              "spec": {
+                "template": {
+                  "spec": {
+                    "containers": [
+                      {
+                        "image": "busybox:1.36",
+                        "name": "job"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "schedule": "0 0 * * *"
+          }
+        }
+      ]
+    },
+    "locations": {
+      "containers.0": {
+        "line": 1
+      },
+      "containers.1": {
+        "line": 14
+      },
+      "resources.0": {
+        "line": 1
+      },
+      "resources.1": {
+        "line": 14
+      },
+      "resources.2": {
+        "line": 31
+      },
+      "workloads.0": {
+        "line": 1
+      },
+      "workloads.1": {
+        "line": 14
+      }
+    }
+  }
+]

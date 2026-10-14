@@ -1,0 +1,2085 @@
+# terraform rules for StackGuard.
+
+# -----------------------------------------------------------------------------
+# SECURITY
+# -----------------------------------------------------------------------------
+id: TF_SEC_001
+title: Secret hardcoded in Terraform configuration
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: A secret, token or key is written as a literal value
+pass_message: No hardcoded secrets found
+description: |
+  Literal secrets in .tf files are committed to version control and copied in
+  plaintext into the state file and plan output.
+remediation: |
+  Read the value from a secret manager data source or an ephemeral / sensitive
+  variable supplied at run time, and rotate the exposed secret.
+query:
+  any:
+    - path: resources[*]
+      where:
+        path: attr_pairs[*]
+        where:
+          all:
+            - path: key
+              matches: '(?i)(secret|token|api_?key|private_?key|client_?secret|access_?key|auth_?key|signing_?key|encryption_?key|connection_?string|sas)'
+            - not: { path: key, matches: '(?i)(_arn|_id|_ids|_name|_names|_length|_version|_type|_enabled|_required|_policy|_rotation|_expiration|_usage|_spec|_source|_location)$' }
+            - not: { path: value, matches: '^\$\{' }
+            - not: { path: value, matches: '^(true|false|[0-9]+)$' }
+            - path: value
+              matches: '.'
+    - path: providers[*]
+      where:
+        path: attr_pairs[*]
+        where:
+          all:
+            - path: key
+              matches: '(?i)(secret|token|client_?secret|api_?key|private_?key)'
+            - not: { path: value, matches: '^\$\{' }
+            - path: value
+              matches: '.'
+    - path: module_calls[*]
+      where:
+        path: attr_pairs[*]
+        where:
+          all:
+            - path: key
+              matches: '(?i)(secret|token|api_?key|private_?key|client_?secret)'
+            - not: { path: value, matches: '^\$\{' }
+            - not: { path: value, matches: '^(true|false|[0-9]+)$' }
+            - path: value
+              matches: '.'
+    - path: variables[*]
+      where:
+        all:
+          - path: name
+            matches: '(?i)(secret|token|api_?key|private_?key|client_?secret)'
+          - path: default
+            matches: '^\S'
+          - not: { path: default, matches: '^\$\{' }
+    - path: locals_entries[*]
+      where:
+        all:
+          - path: name
+            matches: '(?i)(secret|token|api_?key|private_?key|client_?secret)'
+          - path: value
+            matches: '^\S'
+          - not: { path: value, matches: '^\$\{' }
+    - path: strings[*]
+      matches: '-----BEGIN [A-Z ]*PRIVATE KEY-----'
+---
+id: TF_SEC_002
+title: Password hardcoded in Terraform configuration
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: A password is written as a literal value
+pass_message: No hardcoded passwords found
+description: |
+  Database and admin passwords in .tf files are committed to version control
+  and stored in plaintext in state, so anyone with repo or state access can
+  log in.
+remediation: |
+  Let the service manage the password (manage_master_user_password = true on
+  RDS), or generate it with random_password / an ephemeral resource and store
+  it in a secret manager.
+query:
+  any:
+    - path: resources[*]
+      where:
+        path: attr_pairs[*]
+        where:
+          all:
+            - path: key
+              matches: '(?i)(password|passwd|pwd)'
+            - not: { path: key, matches: '(?i)(_arn|_id|_length|_version|_enabled|_required|_policy|_reset_required|_wo_version)$' }
+            - not: { path: value, matches: '^\$\{' }
+            - not: { path: value, matches: '^(true|false|[0-9]+)$' }
+            - path: value
+              matches: '.'
+    - path: module_calls[*]
+      where:
+        path: attr_pairs[*]
+        where:
+          all:
+            - path: key
+              matches: '(?i)(password|passwd|pwd)'
+            - not: { path: value, matches: '^\$\{' }
+            - not: { path: value, matches: '^(true|false|[0-9]+)$' }
+            - path: value
+              matches: '.'
+    - path: providers[*]
+      where:
+        path: attr_pairs[*]
+        where:
+          all:
+            - path: key
+              matches: '(?i)(password|passwd)'
+            - not: { path: value, matches: '^\$\{' }
+            - path: value
+              matches: '.'
+    - path: variables[*]
+      where:
+        all:
+          - path: name
+            matches: '(?i)(password|passwd|pwd)'
+          - path: default
+            matches: '^\S'
+          - not: { path: default, matches: '^\$\{' }
+---
+id: TF_SEC_003
+title: Cloud access key detected
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: A cloud access key or service account key is in the configuration
+pass_message: No static cloud keys found
+description: |
+  Static cloud keys in provider blocks or strings give anyone with repository
+  access full use of those credentials.
+remediation: |
+  Remove the key, rotate it, and authenticate through the environment, an
+  assumed role, OIDC / workload identity federation or managed identity.
+query:
+  any:
+    - path: strings[*]
+      matches: '((AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|"type"\s*:\s*"service_account"|AccountKey=[A-Za-z0-9+/=]{40,})'
+    - path: providers[*]
+      where:
+        path: attr_pairs[*]
+        where:
+          all:
+            - path: key
+              in: [access_key, secret_key, token, client_secret, client_certificate_password, credentials]
+            - not: { path: value, matches: '^\$\{' }
+            - path: value
+              matches: '.'
+---
+id: TF_SEC_004
+title: Publicly accessible database detected
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: A managed database is configured to be reachable from the public internet
+pass_message: No databases are publicly accessible
+description: |
+  Public database endpoints are scanned continuously; one weak password or
+  unpatched engine vulnerability exposes all data.
+remediation: |
+  Keep databases private (publicly_accessible = false, public network access
+  disabled) and connect through private subnets, private endpoints or a
+  bastion / VPN.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            in: [aws_db_instance, aws_rds_cluster_instance, aws_redshift_cluster, aws_dms_replication_instance]
+          - path: attrs.publicly_accessible
+            equals: true
+      - all:
+          - path: type
+            in: [azurerm_mssql_server, azurerm_postgresql_flexible_server, azurerm_mysql_flexible_server, azurerm_postgresql_server, azurerm_mysql_server, azurerm_mariadb_server, azurerm_cosmosdb_account, azurerm_redis_cache, azurerm_synapse_workspace]
+          - any:
+              - path: attrs.public_network_access_enabled
+                equals: true
+              - path: attrs.public_network_access_enabled
+                exists: false
+      - all:
+          - path: type
+            equals: google_sql_database_instance
+          - path: attrs.settings.ip_configuration.ipv4_enabled
+            equals: true
+          - path: attrs.settings.ip_configuration.authorized_networks.value
+            in: [0.0.0.0/0, "::/0"]
+---
+id: TF_SEC_005
+title: Publicly accessible storage bucket detected
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: A storage bucket or container can be read publicly
+pass_message: No publicly readable buckets found
+description: |
+  Public buckets are the most common source of large data leaks.
+remediation: |
+  Block public access (aws_s3_bucket_public_access_block with all four
+  settings true, public_access_prevention = "enforced",
+  allow_nested_items_to_be_public = false) and serve public content through
+  a CDN with origin access control.
+query:
+  any:
+    - path: resources[*]
+      where:
+        all:
+          - path: type
+            in: [aws_s3_bucket, aws_s3_bucket_acl]
+          - path: attrs.acl
+            in: [public-read, public-read-write, authenticated-read]
+    - all:
+        - path: resources[*]
+          where:
+            all:
+              - path: type
+                equals: aws_s3_bucket
+              - not:
+                  path: referenced_by[*]
+                  where:
+                    all:
+                      - path: type
+                        equals: aws_s3_bucket_public_access_block
+                      - path: attrs.block_public_acls
+                        equals: true
+                      - path: attrs.block_public_policy
+                        equals: true
+                      - path: attrs.ignore_public_acls
+                        equals: true
+                      - path: attrs.restrict_public_buckets
+                        equals: true
+        - not:
+            path: resources[*]
+            where:
+              path: type
+              equals: aws_s3_account_public_access_block
+    - path: resources[*]
+      where:
+        all:
+          - path: type
+            equals: aws_s3_bucket_policy
+          - path: policy_statements[*]
+            where:
+              all:
+                - path: effect
+                  equals: Allow
+                - path: principals
+                  contains_any: ["*", "AWS:*"]
+                - path: has_condition
+                  equals: false
+    - path: resources[*]
+      where:
+        all:
+          - path: type
+            equals: azurerm_storage_account
+          - path: attrs.allow_nested_items_to_be_public
+            equals: true
+    - path: resources[*]
+      where:
+        all:
+          - path: type
+            equals: azurerm_storage_container
+          - path: attrs.container_access_type
+            in: [blob, container]
+    - path: resources[*]
+      where:
+        all:
+          - path: type
+            in: [google_storage_bucket_iam_member, google_storage_bucket_iam_binding, google_storage_bucket_access_control, google_storage_default_object_access_control]
+          - any:
+              - path: attrs.member
+                in: [allUsers, allAuthenticatedUsers]
+              - path: attrs.members
+                contains_any: [allUsers, allAuthenticatedUsers]
+              - path: attrs.entity
+                in: [allUsers, allAuthenticatedUsers]
+---
+id: TF_SEC_006
+title: Security group allows unrestricted access
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: An AWS security group allows inbound traffic from anywhere on non-web ports
+pass_message: No security group exposes non-web ports to the internet
+description: |
+  0.0.0.0/0 or "::/0" on SSH, RDP, database or all ports exposes services to
+  internet-wide scanning and brute force.
+remediation: |
+  Restrict sources to known CIDRs or security groups, and use SSM Session
+  Manager or a VPN instead of open SSH / RDP. Only load balancers should
+  accept 80/443 from anywhere.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            equals: aws_security_group
+          - path: attrs.ingress[*]
+            where:
+              all:
+                - any:
+                    - path: cidr_blocks
+                      contains: 0.0.0.0/0
+                    - path: ipv6_cidr_blocks
+                      contains: "::/0"
+                - not:
+                    all:
+                      - path: from_port
+                        in: [80, 443]
+                      - path: to_port
+                        equals_ref: from_port
+      - all:
+          - path: type
+            equals: aws_security_group_rule
+          - path: attrs.type
+            equals: ingress
+          - any:
+              - path: attrs.cidr_blocks
+                contains: 0.0.0.0/0
+              - path: attrs.ipv6_cidr_blocks
+                contains: "::/0"
+          - not:
+              all:
+                - path: attrs.from_port
+                  in: [80, 443]
+                - path: attrs.to_port
+                  equals_ref: attrs.from_port
+      - all:
+          - path: type
+            equals: aws_vpc_security_group_ingress_rule
+          - any:
+              - path: attrs.cidr_ipv4
+                equals: 0.0.0.0/0
+              - path: attrs.cidr_ipv6
+                equals: "::/0"
+          - not:
+              all:
+                - path: attrs.from_port
+                  in: [80, 443]
+                - path: attrs.to_port
+                  equals_ref: attrs.from_port
+---
+id: TF_SEC_007
+title: Firewall rule allows 0.0.0.0/0 access
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: A firewall, NSG or network ACL rule allows inbound traffic from any address
+pass_message: No firewall rule opens inbound access to the internet
+description: |
+  Inbound allow rules from any source expose every port they cover to the
+  whole internet.
+remediation: |
+  Limit source ranges to known networks or service tags, and never open
+  admin ports (22, 3389) or database ports to the internet.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            equals: azurerm_network_security_rule
+          - path: attrs.direction
+            equals: Inbound
+          - path: attrs.access
+            equals: Allow
+          - any:
+              - path: attrs.source_address_prefix
+                in: ["*", 0.0.0.0/0, Internet, Any, "0.0.0.0"]
+              - path: attrs.source_address_prefixes
+                contains_any: ["*", 0.0.0.0/0, Internet, Any]
+      - all:
+          - path: type
+            equals: azurerm_network_security_group
+          - path: attrs.security_rule[*]
+            where:
+              all:
+                - path: direction
+                  equals: Inbound
+                - path: access
+                  equals: Allow
+                - path: source_address_prefix
+                  in: ["*", 0.0.0.0/0, Internet, Any]
+      - all:
+          - path: type
+            equals: google_compute_firewall
+          - not: { path: attrs.direction, equals: EGRESS }
+          - path: attrs.allow
+            exists: true
+          - path: attrs.source_ranges
+            contains_any: [0.0.0.0/0, "::/0"]
+      - all:
+          - path: type
+            equals: aws_network_acl_rule
+          - path: attrs.egress
+            not_equals: true
+          - path: attrs.rule_action
+            equals: allow
+          - path: attrs.cidr_block
+            equals: 0.0.0.0/0
+          - any:
+              - path: attrs.protocol
+                in: ["-1", -1, all]
+              - path: attrs.from_port
+                in: [22, 3389]
+---
+id: TF_SEC_008
+title: Encryption at rest not enabled
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: A data store is created without encryption at rest
+pass_message: Data stores enable encryption at rest
+description: |
+  Unencrypted volumes, databases and snapshots expose data through backups,
+  shared snapshots and decommissioned disks.
+remediation: |
+  Enable encryption (preferably with a customer-managed KMS key) on the
+  resource; for EBS, also enable aws_ebs_encryption_by_default.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            in: [aws_db_instance, aws_rds_cluster, aws_docdb_cluster, aws_neptune_cluster]
+          - not: { path: attrs.storage_encrypted, equals: true }
+      - all:
+          - path: type
+            in: [aws_ebs_volume, aws_efs_file_system, aws_redshift_cluster]
+          - not: { path: attrs.encrypted, equals: true }
+      - all:
+          - path: type
+            equals: aws_elasticache_replication_group
+          - not: { path: attrs.at_rest_encryption_enabled, equals: true }
+      - all:
+          - path: type
+            in: [aws_opensearch_domain, aws_elasticsearch_domain]
+          - not: { path: attrs.encrypt_at_rest.enabled, equals: true }
+      - all:
+          - path: type
+            equals: aws_kinesis_stream
+          - not: { path: attrs.encryption_type, equals: KMS }
+      - all:
+          - path: type
+            equals: aws_sns_topic
+          - path: attrs.kms_master_key_id
+            exists: false
+      - all:
+          - path: type
+            in: [aws_instance, aws_launch_template, aws_launch_configuration]
+          - any:
+              - path: attrs.root_block_device.encrypted
+                equals: false
+              - path: attrs.ebs_block_device.encrypted
+                equals: false
+              - path: attrs.block_device_mappings.ebs.encrypted
+                equals: false
+---
+id: TF_SEC_009
+title: Encryption in transit not enforced
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: A service accepts unencrypted connections or outdated TLS versions
+pass_message: Services enforce encryption in transit
+description: |
+  Plain HTTP, TLS 1.0 / 1.1 and optional TLS let credentials and data be read
+  or modified on the network.
+remediation: |
+  Redirect HTTP to HTTPS, require TLS 1.2+ and enable in-transit encryption on
+  caches, search and database connections.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            in: [aws_lb_listener, aws_alb_listener]
+          - path: attrs.protocol
+            equals: HTTP
+          - not: { path: attrs.default_action.type, equals: redirect }
+      - all:
+          - path: type
+            in: [aws_lb_listener, aws_alb_listener]
+          - path: attrs.ssl_policy
+            matches: '(TLS-1-0|TLS-1-1|2015-05|2016-08|FS-2018-06|FS-1-1)'
+      - all:
+          - path: type
+            equals: aws_cloudfront_distribution
+          - any:
+              - path: attrs.default_cache_behavior.viewer_protocol_policy
+                equals: allow-all
+              - path: attrs.ordered_cache_behavior.viewer_protocol_policy
+                equals: allow-all
+              - path: attrs.viewer_certificate.minimum_protocol_version
+                matches: '^(SSLv3|TLSv1(_2016)?|TLSv1\.1_2016)$'
+      - all:
+          - path: type
+            equals: aws_elasticache_replication_group
+          - not: { path: attrs.transit_encryption_enabled, equals: true }
+      - all:
+          - path: type
+            in: [aws_opensearch_domain, aws_elasticsearch_domain]
+          - any:
+              - not: { path: attrs.domain_endpoint_options.enforce_https, equals: true }
+              - not: { path: attrs.node_to_node_encryption.enabled, equals: true }
+      - all:
+          - path: type
+            equals: azurerm_storage_account
+          - any:
+              - path: attrs.https_traffic_only_enabled
+                equals: false
+              - path: attrs.enable_https_traffic_only
+                equals: false
+              - path: attrs.min_tls_version
+                in: [TLS1_0, TLS1_1]
+      - all:
+          - path: type
+            in: [azurerm_mssql_server, azurerm_redis_cache]
+          - path: attrs.minimum_tls_version
+            in: ["1.0", "1.1"]
+      - all:
+          - path: type
+            in: [azurerm_app_service, azurerm_linux_web_app, azurerm_windows_web_app, azurerm_function_app, azurerm_linux_function_app, azurerm_windows_function_app]
+          - not: { path: attrs.https_only, equals: true }
+      - all:
+          - path: type
+            equals: google_sql_database_instance
+          - not: { path: attrs.settings.ip_configuration.ssl_mode, in: [ENCRYPTED_ONLY, TRUSTED_CLIENT_CERTIFICATE_REQUIRED] }
+          - not: { path: attrs.settings.ip_configuration.require_ssl, equals: true }
+      - all:
+          - path: type
+            equals: google_compute_ssl_policy
+          - path: attrs.min_tls_version
+            in: [TLS_1_0, TLS_1_1]
+---
+id: TF_SEC_010
+title: IAM permissions are overly permissive
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: A policy or role assignment grants full or wildcard administrative access
+pass_message: No wildcard administrative grants found
+description: |
+  Action "*" on Resource "*", service-wide wildcards and owner / editor roles
+  turn any compromise of the identity into control of the whole account,
+  subscription or project.
+remediation: |
+  Grant specific actions on specific resources; use predefined least-privilege
+  roles; reserve admin roles for break-glass identities.
+query:
+  any:
+    - path: resources[*]
+      where:
+        any:
+          - path: policy_statements[*]
+            where:
+              all:
+                - path: effect
+                  equals: Allow
+                - any:
+                    - path: actions
+                      contains_any: ["*", "*:*"]
+                    - path: actions[*]
+                      matches: '^[a-z0-9-]+:\*$'
+                    - path: not_actions
+                      exists: true
+                - path: resources
+                  contains: "*"
+          - all:
+              - path: type
+                in: [aws_iam_role_policy_attachment, aws_iam_user_policy_attachment, aws_iam_group_policy_attachment, aws_iam_policy_attachment]
+              - path: attrs.policy_arn
+                matches: ':policy/(AdministratorAccess|PowerUserAccess|IAMFullAccess)$'
+          - all:
+              - path: type
+                equals: azurerm_role_assignment
+              - path: attrs.role_definition_name
+                in: [Owner, Contributor, User Access Administrator]
+              - path: attrs.scope
+                matches: '^(/subscriptions/[^/]+/?$|/providers/Microsoft\.Management/managementGroups/|\$\{data\.azurerm_subscription)'
+          - all:
+              - path: type
+                in: [google_project_iam_member, google_project_iam_binding, google_organization_iam_member, google_organization_iam_binding, google_folder_iam_member, google_folder_iam_binding]
+              - path: attrs.role
+                in: [roles/owner, roles/editor, roles/iam.securityAdmin, roles/resourcemanager.projectIamAdmin]
+    - path: data_sources[*]
+      where:
+        path: policy_statements[*]
+        where:
+          all:
+            - path: effect
+              equals: Allow
+            - path: actions
+              contains_any: ["*", "*:*"]
+            - path: resources
+              contains: "*"
+---
+id: TF_SEC_011
+title: Resource lacks least-privilege configuration
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: An identity is trusted by anyone, uses long-lived keys or broad default permissions
+pass_message: Identities follow least privilege
+description: |
+  Trust policies open to any principal, static access keys, permissions
+  attached directly to users, iam:PassRole on "*", and default service
+  accounts with full API scope give more access than the workload needs.
+remediation: |
+  Restrict trust policies to specific principals with conditions, use roles /
+  workload identity instead of keys, attach permissions to groups or roles,
+  scope PassRole to specific role ARNs, and give each workload a dedicated
+  service account with minimal scopes.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            equals: aws_iam_role
+          - path: policy_statements[*]
+            where:
+              all:
+                - path: effect
+                  equals: Allow
+                - path: principals
+                  contains_any: ["*", "AWS:*"]
+                - path: has_condition
+                  equals: false
+      - path: type
+        in: [aws_iam_access_key, google_service_account_key, aws_iam_user_policy, aws_iam_user_policy_attachment]
+      - path: policy_statements[*]
+        where:
+          all:
+            - path: effect
+              equals: Allow
+            - path: actions
+              contains_any: ["iam:PassRole", "iam:*"]
+            - path: resources
+              contains: "*"
+      - all:
+          - path: type
+            in: [google_compute_instance, google_compute_instance_template, google_container_node_pool]
+          - any:
+              - path: attrs.service_account.email
+                exists: false
+              - path: attrs.service_account.email
+                matches: '-compute@developer\.gserviceaccount\.com$'
+              - path: attrs.service_account.scopes
+                contains: cloud-platform
+              - path: attrs.node_config.service_account
+                exists: false
+---
+id: TF_SEC_012
+title: Audit logging not enabled
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: Account-level audit logging or resource access logging is missing
+pass_message: Audit logging is configured
+description: |
+  Without audit and access logs you cannot detect or investigate unauthorized
+  access, and most compliance frameworks require them.
+remediation: |
+  Enable a multi-region CloudTrail with log file validation, VPC flow logs,
+  load balancer / S3 access logs and database log exports; on Azure add
+  diagnostic settings; on Google Cloud configure Data Access audit logs.
+query:
+  any:
+    - all:
+        - path: context.is_root_module
+          equals: true
+        - path: summary.types.aws_vpc
+          gte: 1
+        - path: summary.types.aws_cloudtrail
+          exists: false
+    - path: resources[*]
+      where:
+        any:
+          - all:
+              - path: type
+                equals: aws_cloudtrail
+              - any:
+                  - not: { path: attrs.is_multi_region_trail, equals: true }
+                  - not: { path: attrs.enable_log_file_validation, equals: true }
+          - all:
+              - path: type
+                equals: aws_vpc
+              - not: { path: 'referenced_by[*].type', equals: aws_flow_log }
+          - all:
+              - path: type
+                in: [aws_lb, aws_alb]
+              - not: { path: attrs.access_logs.enabled, equals: true }
+          - all:
+              - path: type
+                equals: aws_db_instance
+              - path: attrs.enabled_cloudwatch_logs_exports
+                exists: false
+          - all:
+              - path: type
+                equals: aws_eks_cluster
+              - path: attrs.enabled_cluster_log_types
+                exists: false
+          - all:
+              - path: type
+                equals: aws_s3_bucket
+              - not: { path: 'referenced_by[*].type', equals: aws_s3_bucket_logging }
+          - all:
+              - path: type
+                in: [azurerm_key_vault, azurerm_storage_account, azurerm_mssql_server, azurerm_kubernetes_cluster, azurerm_application_gateway, azurerm_firewall]
+              - not: { path: 'referenced_by[*].type', equals: azurerm_monitor_diagnostic_setting }
+    - all:
+        - path: context.is_root_module
+          equals: true
+        - path: summary.types.google_project_service
+          gte: 1
+        - path: summary.types.google_project_iam_audit_config
+          exists: false
+---
+id: TF_SEC_013
+title: MFA enforcement not detected
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: Console users or user pools are created without MFA enforcement
+pass_message: MFA enforcement is configured
+description: |
+  Password-only accounts are taken over through phishing and credential
+  stuffing.
+remediation: |
+  Use SSO instead of IAM users; otherwise deny actions when
+  aws:MultiFactorAuthPresent is false, set mfa_configuration = "ON" on Cognito
+  user pools, and enforce MFA through conditional access on Azure.
+query:
+  any:
+    - path: resources[*]
+      where:
+        all:
+          - path: type
+            equals: aws_cognito_user_pool
+          - any:
+              - path: attrs.mfa_configuration
+                exists: false
+              - path: attrs.mfa_configuration
+                equals: "OFF"
+    - all:
+        - path: summary.types.aws_iam_user_login_profile
+          gte: 1
+        - not:
+            path: resources[*].policy_statements[*].condition_keys
+            contains_any: ["aws:MultiFactorAuthPresent", "aws:MultiFactorAuthAge"]
+        - not:
+            path: data_sources[*].policy_statements[*].condition_keys
+            contains_any: ["aws:MultiFactorAuthPresent", "aws:MultiFactorAuthAge"]
+    - all:
+        - path: summary.types.azuread_user
+          gte: 1
+        - path: summary.types.azuread_conditional_access_policy
+          exists: false
+---
+id: TF_SEC_014
+title: Secret manager not used
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: Secrets are passed through variables without a secret manager or sensitive flag
+pass_message: Secrets use a manager or sensitive variables
+description: |
+  Secrets in tfvars files or non-sensitive variables end up in CI logs, plan
+  output and shared files instead of a managed, audited store.
+remediation: |
+  Store secrets in a secret manager and read them with data sources (or
+  ephemeral resources); mark any remaining secret variables sensitive = true.
+query:
+  any:
+    - path: variables[*]
+      where:
+        all:
+          - path: name
+            matches: '(?i)(password|passwd|secret|token|api_?key|private_?key|client_?secret|connection_?string)'
+          - not: { path: sensitive, equals: true }
+    - path: outputs[*]
+      where:
+        all:
+          - path: value
+            matches: '(?i)(password|secret|token|private_key|access_key|connection_string)'
+          - not: { path: sensitive, equals: true }
+    - all:
+        - path: variables[*]
+          where:
+            path: name
+            matches: '(?i)(password|passwd|secret|token|api_?key|private_?key|client_?secret)'
+        - not:
+            path: data_sources[*]
+            where:
+              path: type
+              in: [aws_secretsmanager_secret_version, aws_ssm_parameter, azurerm_key_vault_secret, google_secret_manager_secret_version, vault_generic_secret, vault_kv_secret_v2]
+        - not:
+            path: resources[*]
+            where:
+              path: type
+              in: [aws_secretsmanager_secret, azurerm_key_vault_secret, google_secret_manager_secret]
+---
+id: TF_SEC_015
+title: Key rotation not configured
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: An encryption key or managed secret has no automatic rotation
+pass_message: Keys and secrets rotate automatically
+description: |
+  Keys and secrets that are never rotated stay valid indefinitely after a
+  leak and violate most compliance baselines.
+remediation: |
+  Enable rotation: enable_key_rotation = true (aws_kms_key), rotation_policy
+  (azurerm_key_vault_key), rotation_period (google_kms_crypto_key), and
+  aws_secretsmanager_secret_rotation for managed secrets.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            equals: aws_kms_key
+          - not: { path: attrs.customer_master_key_spec, matches: '^(RSA|ECC|HMAC|SM2)' }
+          - not: { path: attrs.enable_key_rotation, equals: true }
+      - all:
+          - path: type
+            equals: azurerm_key_vault_key
+          - path: attrs.rotation_policy
+            exists: false
+      - all:
+          - path: type
+            equals: google_kms_crypto_key
+          - path: attrs.rotation_period
+            exists: false
+      - all:
+          - path: type
+            equals: aws_secretsmanager_secret
+          - not: { path: 'referenced_by[*].type', equals: aws_secretsmanager_secret_rotation }
+
+# -----------------------------------------------------------------------------
+# STATE
+# -----------------------------------------------------------------------------
+---
+id: TF_STATE_001
+title: Local Terraform state detected
+severity: ERROR
+category: operational
+target: terraform
+resource: terraform
+message: A state file is committed to the repository or the local backend is used
+pass_message: State is stored remotely
+description: |
+  State contains every resource attribute, including passwords and keys, in
+  plaintext. Committed or laptop-local state leaks secrets and cannot be
+  shared or locked.
+remediation: |
+  Remove terraform.tfstate* from the repository (and git history), add it to
+  .gitignore, rotate the secrets it contained, and use a remote backend.
+query:
+  any:
+    - path: context.files[*]
+      matches: '(^|/)terraform\.tfstate(\.backup)?$|(^|/)\.terraform/terraform\.tfstate$'
+    - path: terraform.backend.type
+      equals: local
+---
+id: TF_STATE_002
+title: Remote backend not configured
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: The root module has no backend or cloud block
+pass_message: A remote backend is configured
+description: |
+  Without a remote backend, state lives on whoever ran the last apply; team
+  members and CI overwrite each other's changes.
+remediation: |
+  Configure a remote backend (s3, azurerm, gcs, HCP Terraform / cloud block)
+  with encryption, versioning and locking.
+query:
+  all:
+    - path: context.is_root_module
+      equals: true
+    - path: terraform.backend
+      exists: false
+    - path: terraform.cloud
+      exists: false
+---
+id: TF_STATE_003
+title: State locking not configured
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: The backend does not lock state during operations
+pass_message: State locking is configured
+description: |
+  Two concurrent applies against unlocked state corrupt it or silently lose
+  resources.
+remediation: |
+  For S3 set use_lockfile = true (Terraform 1.10+) or dynamodb_table; for the
+  http backend configure lock_address. azurerm, gcs and HCP Terraform lock
+  automatically.
+query:
+  any:
+    - all:
+        - path: terraform.backend.type
+          equals: s3
+        - path: terraform.backend.attrs.dynamodb_table
+          exists: false
+        - not: { path: terraform.backend.attrs.use_lockfile, equals: true }
+    - all:
+        - path: terraform.backend.type
+          equals: http
+        - path: terraform.backend.attrs.lock_address
+          exists: false
+---
+id: TF_STATE_004
+title: State encryption not configured
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: The state backend does not encrypt state with a managed key
+pass_message: State is encrypted at rest
+description: |
+  State holds secrets in plaintext; the storage that holds it must be
+  encrypted and access-controlled.
+remediation: |
+  For S3 set encrypt = true (and kms_key_id for a customer-managed key); for
+  GCS set kms_encryption_key.
+query:
+  any:
+    - all:
+        - path: terraform.backend.type
+          equals: s3
+        - not: { path: terraform.backend.attrs.encrypt, equals: true }
+    - all:
+        - path: terraform.backend.type
+          equals: gcs
+        - path: terraform.backend.attrs.kms_encryption_key
+          exists: false
+        - path: terraform.backend.attrs.encryption_key
+          exists: false
+---
+id: TF_STATE_005
+title: State backup strategy not configured
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: The bucket or storage account that holds state has no versioning
+pass_message: The state store has versioning enabled
+description: |
+  Without versioning, a bad apply, manual edit or deletion of the state file
+  cannot be undone.
+remediation: |
+  Enable versioning on the state bucket (S3 / GCS) or blob versioning and
+  soft delete on the Azure storage account, plus deletion protection.
+query:
+  all:
+    - path: context.state_store.found
+      equals: true
+    - any:
+        - path: context.state_store.versioning
+          equals: false
+        - all:
+            - path: terraform.backend.type
+              equals: azurerm
+            - path: context.state_store.soft_delete
+              equals: false
+
+# -----------------------------------------------------------------------------
+# RESOURCES (tagging and lifecycle)
+# -----------------------------------------------------------------------------
+---
+id: TF_RES_001
+title: Resource tags missing
+severity: WARNING
+category: maintainability
+target: terraform
+resource: terraform
+message: A taggable resource has no tags or labels
+pass_message: Taggable resources are tagged
+description: |
+  Untagged resources cannot be attributed to an owner, environment or cost
+  center, and tag-based policies and automation skip them.
+remediation: |
+  Set provider default_tags (AWS) or a shared tags / labels local, and merge
+  resource-specific tags on top.
+query:
+  path: resources[*]
+  where:
+    all:
+      - path: taggable
+        equals: true
+      - not: { path: tags, length_gte: 1 }
+---
+id: TF_RES_002
+title: Ownership metadata missing
+severity: WARNING
+category: maintainability
+target: terraform
+resource: terraform
+message: The resource has no owner or team tag
+pass_message: Resources carry an owner tag
+description: |
+  Without an owner tag, incidents, cost anomalies and security findings cannot
+  be routed to a responsible team.
+remediation: |
+  Add an owner / team tag (via provider default_tags or a common tags local).
+enabled: false
+query:
+  path: resources[*]
+  where:
+    all:
+      - path: taggable
+        equals: true
+      - path: tags
+        length_gte: 1
+      - path: tags.owner
+        exists: false
+      - path: tags.Owner
+        exists: false
+      - path: tags.team
+        exists: false
+      - path: tags.Team
+        exists: false
+---
+id: TF_RES_003
+title: Environment metadata missing
+severity: WARNING
+category: maintainability
+target: terraform
+resource: terraform
+message: The resource has no environment tag
+pass_message: Resources carry an environment tag
+description: |
+  Without an environment tag, production resources cannot be told apart from
+  test resources in policies, alerts and cost reports.
+remediation: |
+  Add an environment tag (e.g. environment = "prod") through default_tags.
+enabled: false
+query:
+  path: resources[*]
+  where:
+    all:
+      - path: taggable
+        equals: true
+      - path: tags
+        length_gte: 1
+      - path: tags.environment
+        exists: false
+      - path: tags.env
+        exists: false
+      - path: tags.Environment
+        exists: false
+---
+id: TF_RES_004
+title: Cost allocation tags missing
+severity: WARNING
+category: maintainability
+target: terraform
+resource: terraform
+message: The resource has no cost-center or project tag
+pass_message: Resources carry a cost allocation tag
+description: |
+  Cloud bills cannot be split by team or product without cost allocation tags.
+remediation: |
+  Add a cost-center / project tag and activate it as a cost allocation tag in
+  the billing console.
+enabled: false
+query:
+  path: resources[*]
+  where:
+    all:
+      - path: taggable
+        equals: true
+      - path: tags
+        length_gte: 1
+      - path: tags.cost-center
+        exists: false
+      - path: tags.cost_center
+        exists: false
+      - path: tags.costcenter
+        exists: false
+      - path: tags.CostCenter
+        exists: false
+      - path: tags.project
+        exists: false
+      - path: tags.Project
+        exists: false
+---
+id: TF_RES_005
+title: Lifecycle policy not configured
+severity: WARNING
+category: maintainability
+target: terraform
+resource: terraform
+message: Storage, image repositories or logs grow without an expiry policy
+pass_message: Storage and logs have lifecycle policies
+description: |
+  Without lifecycle rules, old objects, image versions and log data
+  accumulate forever, increasing cost and retained sensitive data.
+remediation: |
+  Add aws_s3_bucket_lifecycle_configuration, aws_ecr_lifecycle_policy,
+  retention_in_days on log groups, lifecycle_rule on GCS buckets, and an
+  azurerm_storage_management_policy.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            equals: aws_s3_bucket
+          - not: { path: 'referenced_by[*].type', equals: aws_s3_bucket_lifecycle_configuration }
+          - path: attrs.lifecycle_rule
+            exists: false
+      - all:
+          - path: type
+            equals: aws_ecr_repository
+          - not: { path: 'referenced_by[*].type', equals: aws_ecr_lifecycle_policy }
+      - all:
+          - path: type
+            equals: aws_cloudwatch_log_group
+          - any:
+              - path: attrs.retention_in_days
+                exists: false
+              - path: attrs.retention_in_days
+                equals: 0
+      - all:
+          - path: type
+            equals: google_storage_bucket
+          - path: attrs.lifecycle_rule
+            exists: false
+      - all:
+          - path: type
+            equals: azurerm_storage_account
+          - not: { path: 'referenced_by[*].type', equals: azurerm_storage_management_policy }
+
+# -----------------------------------------------------------------------------
+# NETWORK
+# -----------------------------------------------------------------------------
+---
+id: TF_NET_001
+title: Database exposed to public internet
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: A firewall or security group opens a database port to the internet
+pass_message: No database ports are open to the internet
+description: |
+  Even a private-flagged database becomes reachable when network rules allow
+  database ports from 0.0.0.0/0.
+remediation: |
+  Allow database ports only from application security groups, subnets or
+  private endpoints.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            equals: aws_security_group
+          - path: attrs.ingress[*]
+            where:
+              all:
+                - path: cidr_blocks
+                  contains: 0.0.0.0/0
+                - any:
+                    - path: from_port
+                      in: [1433, 1521, 2483, 3306, 5432, 5439, 6379, 9042, 9200, 11211, 27017, 0]
+                    - path: protocol
+                      in: ["-1", -1]
+      - all:
+          - path: type
+            in: [aws_security_group_rule, aws_vpc_security_group_ingress_rule]
+          - any:
+              - path: attrs.cidr_blocks
+                contains: 0.0.0.0/0
+              - path: attrs.cidr_ipv4
+                equals: 0.0.0.0/0
+          - path: attrs.from_port
+            in: [1433, 1521, 2483, 3306, 5432, 5439, 6379, 9042, 9200, 11211, 27017]
+      - all:
+          - path: type
+            in: [azurerm_mssql_firewall_rule, azurerm_postgresql_flexible_server_firewall_rule, azurerm_mysql_flexible_server_firewall_rule, azurerm_postgresql_firewall_rule, azurerm_mysql_firewall_rule]
+          - path: attrs.start_ip_address
+            equals: 0.0.0.0
+          - path: attrs.end_ip_address
+            equals: 255.255.255.255
+      - all:
+          - path: type
+            equals: google_sql_database_instance
+          - path: attrs.settings.ip_configuration.authorized_networks.value
+            in: [0.0.0.0/0, "::/0"]
+---
+id: TF_NET_002
+title: Load balancer exposes sensitive service
+severity: ERROR
+category: security
+target: terraform
+resource: terraform
+message: An internet-facing load balancer forwards an admin or database port
+pass_message: No public load balancer forwards sensitive ports
+description: |
+  Publishing SSH, RDP, database, Docker or Kubernetes API ports through a
+  public load balancer exposes them to the internet.
+remediation: |
+  Use internal load balancers for these services, or expose them only through
+  a VPN / private link.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            in: [aws_lb_listener, aws_alb_listener]
+          - path: attrs.port
+            in: [22, 23, 3389, 1433, 1521, 3306, 5432, 6379, 9200, 27017, 2375, 2376, 6443, 10250]
+          - path: references[*]
+            where:
+              all:
+                - path: type
+                  in: [aws_lb, aws_alb]
+                - not: { path: attrs.internal, equals: true }
+      - all:
+          - path: type
+            equals: aws_elb
+          - not: { path: attrs.internal, equals: true }
+          - path: attrs.listener.lb_port
+            in: [22, 23, 3389, 1433, 1521, 3306, 5432, 6379, 9200, 27017, 2375, 2376, 6443, 10250]
+      - all:
+          - path: type
+            equals: azurerm_lb_rule
+          - path: attrs.frontend_port
+            in: [22, 3389, 1433, 3306, 5432, 6379, 27017, 6443]
+          - path: references[*].attrs.frontend_ip_configuration.public_ip_address_id
+            exists: true
+      - all:
+          - path: type
+            equals: google_compute_forwarding_rule
+          - not: { path: attrs.load_balancing_scheme, in: [INTERNAL, INTERNAL_MANAGED] }
+          - any:
+              - path: attrs.port_range
+                matches: '^(22|3389|1433|3306|5432|6379|27017|6443)(-|$)'
+              - path: attrs.ports
+                contains_any: ["22", "3389", "1433", "3306", "5432", "6379", "27017", "6443"]
+---
+id: TF_NET_003
+title: Network segmentation not configured
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: A workload is placed in the default network instead of a dedicated VPC / subnet
+pass_message: Workloads use dedicated networks
+description: |
+  Resources without an explicit subnet land in the default VPC / network,
+  which has public subnets and permissive defaults, and share it with
+  everything else.
+remediation: |
+  Create dedicated VPCs / VNets with separate public, application and data
+  subnets, and place every workload in an explicit subnet.
+query:
+  path: resources[*]
+  where:
+    any:
+      - path: type
+        in: [aws_default_vpc, aws_default_subnet, aws_default_security_group]
+      - all:
+          - path: type
+            equals: aws_instance
+          - path: attrs.subnet_id
+            exists: false
+          - path: attrs.network_interface
+            exists: false
+      - all:
+          - path: type
+            in: [aws_db_instance, aws_rds_cluster]
+          - path: attrs.db_subnet_group_name
+            exists: false
+      - all:
+          - path: type
+            in: [aws_elasticache_cluster, aws_elasticache_replication_group]
+          - path: attrs.subnet_group_name
+            exists: false
+      - all:
+          - path: type
+            in: [google_compute_instance, google_compute_instance_template]
+          - any:
+              - path: attrs.network_interface.network
+                equals: default
+              - all:
+                  - path: attrs.network_interface.network
+                    exists: false
+                  - path: attrs.network_interface.subnetwork
+                    exists: false
+      - all:
+          - path: type
+            equals: google_container_cluster
+          - any:
+              - path: attrs.network
+                exists: false
+              - path: attrs.network
+                equals: default
+      - all:
+          - path: type
+            equals: azurerm_kubernetes_cluster
+          - path: attrs.default_node_pool.vnet_subnet_id
+            exists: false
+---
+id: TF_NET_004
+title: Private subnet not used
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: A compute resource or cluster gets a public IP or public endpoint
+pass_message: Workloads stay in private subnets
+description: |
+  Instances, nodes and cluster control planes with public addresses are
+  directly reachable from the internet and bypass the load balancer and WAF.
+remediation: |
+  Place workloads in private subnets without public IPs, reach them through
+  load balancers, and make cluster endpoints private (or restrict their
+  allowed CIDRs).
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            equals: aws_instance
+          - path: attrs.associate_public_ip_address
+            equals: true
+      - all:
+          - path: type
+            equals: aws_launch_template
+          - path: attrs.network_interfaces.associate_public_ip_address
+            in: [true, "true"]
+      - all:
+          - path: type
+            equals: aws_eks_cluster
+          - not: { path: attrs.vpc_config.endpoint_public_access, equals: false }
+          - any:
+              - path: attrs.vpc_config.public_access_cidrs
+                exists: false
+              - path: attrs.vpc_config.public_access_cidrs
+                contains: 0.0.0.0/0
+      - all:
+          - path: type
+            in: [google_compute_instance, google_compute_instance_template]
+          - path: attrs.network_interface.access_config
+            exists: true
+      - all:
+          - path: type
+            equals: google_container_cluster
+          - not: { path: attrs.private_cluster_config.enable_private_nodes, equals: true }
+      - all:
+          - path: type
+            equals: azurerm_kubernetes_cluster
+          - not: { path: attrs.private_cluster_enabled, equals: true }
+          - path: attrs.api_server_access_profile.authorized_ip_ranges
+            exists: false
+      - all:
+          - path: type
+            equals: azurerm_network_interface
+          - path: attrs.ip_configuration.public_ip_address_id
+            exists: true
+---
+id: TF_NET_005
+title: NAT gateway strategy not configured
+severity: WARNING
+category: security
+target: terraform
+resource: terraform
+message: Private subnets have no NAT, or a single NAT gateway serves several zones
+pass_message: NAT strategy is configured per zone
+description: |
+  Without NAT, private workloads cannot reach package registries or APIs; a
+  single NAT gateway is a single point of failure for all zones.
+remediation: |
+  Deploy one NAT gateway per availability zone (or VPC endpoints for AWS
+  services); use Cloud NAT on Google Cloud and a NAT gateway on Azure.
+query:
+  any:
+    - all:
+        - path: summary.types.aws_subnet
+          gte: 1
+        - path: summary.types.aws_nat_gateway
+          exists: false
+        - path: summary.types.aws_vpc_endpoint
+          exists: false
+    - all:
+        - path: summary.types.aws_nat_gateway
+          equals: 1
+        - path: summary.az_count
+          gte: 2
+    - all:
+        - path: summary.types.google_compute_subnetwork
+          gte: 1
+        - path: summary.types.google_compute_router_nat
+          exists: false
+    - all:
+        - path: summary.types.azurerm_subnet
+          gte: 1
+        - path: summary.types.azurerm_nat_gateway
+          exists: false
+        - path: summary.types.azurerm_firewall
+          exists: false
+
+# -----------------------------------------------------------------------------
+# RELIABILITY
+# -----------------------------------------------------------------------------
+---
+id: TF_REL_001
+title: High availability configuration missing
+severity: WARNING
+category: reliability
+target: terraform
+resource: terraform
+message: A database, cache, cluster or scaling group runs in a single zone or instance
+pass_message: Critical resources are highly available
+description: |
+  Single-AZ databases, caches without failover, single-instance scaling groups
+  and zonal clusters go down with one zone or host.
+remediation: |
+  Enable Multi-AZ / zone-redundant HA, automatic failover with at least two
+  nodes, min_size >= 2 across zones, and regional clusters.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            equals: aws_db_instance
+          - not: { path: attrs.replicate_source_db, exists: true }
+          - not: { path: attrs.multi_az, equals: true }
+      - all:
+          - path: type
+            equals: aws_elasticache_replication_group
+          - any:
+              - not: { path: attrs.automatic_failover_enabled, equals: true }
+              - not: { path: attrs.multi_az_enabled, equals: true }
+      - all:
+          - path: type
+            equals: aws_autoscaling_group
+          - path: attrs.min_size
+            lt: 2
+      - all:
+          - path: type
+            in: [azurerm_postgresql_flexible_server, azurerm_mysql_flexible_server]
+          - path: attrs.high_availability
+            exists: false
+      - all:
+          - path: type
+            equals: azurerm_kubernetes_cluster
+          - path: attrs.default_node_pool.zones
+            exists: false
+      - all:
+          - path: type
+            equals: google_sql_database_instance
+          - not: { path: attrs.settings.availability_type, equals: REGIONAL }
+      - all:
+          - path: type
+            equals: google_container_cluster
+          - path: attrs.location
+            matches: '-[a-z]$'
+---
+id: TF_REL_002
+title: Backup policy not configured
+severity: WARNING
+category: reliability
+target: terraform
+resource: terraform
+message: A data store has no or too short automated backups
+pass_message: Data stores have automated backups
+description: |
+  Without automated backups, accidental deletion, corruption or ransomware
+  means permanent data loss.
+remediation: |
+  Set backup retention of at least 7 days, enable DynamoDB point-in-time
+  recovery, and protect volumes and file systems with AWS Backup / Azure
+  Backup plans.
+query:
+  any:
+    - path: resources[*]
+      where:
+        any:
+          - all:
+              - path: type
+                in: [aws_db_instance, aws_rds_cluster, aws_docdb_cluster, aws_neptune_cluster]
+              - not: { path: attrs.replicate_source_db, exists: true }
+              - any:
+                  - path: attrs.backup_retention_period
+                    exists: false
+                  - path: attrs.backup_retention_period
+                    lt: 7
+          - all:
+              - path: type
+                equals: aws_dynamodb_table
+              - not: { path: attrs.point_in_time_recovery.enabled, equals: true }
+          - all:
+              - path: type
+                equals: aws_elasticache_replication_group
+              - any:
+                  - path: attrs.snapshot_retention_limit
+                    exists: false
+                  - path: attrs.snapshot_retention_limit
+                    equals: 0
+          - all:
+              - path: type
+                in: [azurerm_postgresql_flexible_server, azurerm_mysql_flexible_server, azurerm_mssql_database]
+              - path: attrs.backup_retention_days
+                lt: 7
+          - all:
+              - path: type
+                equals: google_sql_database_instance
+              - not: { path: attrs.settings.backup_configuration.enabled, equals: true }
+    - all:
+        - any:
+            - path: summary.types.aws_ebs_volume
+              gte: 1
+            - path: summary.types.aws_efs_file_system
+              gte: 1
+        - path: summary.types.aws_backup_plan
+          exists: false
+---
+id: TF_REL_003
+title: Disaster recovery configuration missing
+severity: WARNING
+category: reliability
+target: terraform
+resource: terraform
+message: Stateful resources have no cross-region copy or geo-redundancy
+pass_message: Stateful resources have cross-region recovery
+description: |
+  Same-region backups and replicas do not survive a regional outage or the
+  loss of the account / subscription.
+remediation: |
+  Replicate critical data to a second region (S3 replication, RDS cross-region
+  backup replication or Aurora Global Database, AWS Backup copy_action,
+  DynamoDB global tables, Azure geo-redundant backups, GCS multi-region
+  buckets).
+query:
+  all:
+    - path: resources[*]
+      where:
+        path: stateful
+        equals: true
+    - not:
+        path: resources[*]
+        where:
+          any:
+            - path: type
+              in: [aws_s3_bucket_replication_configuration, aws_db_instance_automated_backups_replication, aws_rds_global_cluster, aws_dynamodb_table_replica]
+            - path: attrs.rule.copy_action
+              exists: true
+            - path: attrs.replica
+              exists: true
+            - path: attrs.geo_redundant_backup_enabled
+              equals: true
+            - path: attrs.account_replication_type
+              in: [GRS, RAGRS, GZRS, RAGZRS]
+            - all:
+                - path: type
+                  equals: google_storage_bucket
+                - path: attrs.location
+                  in: [US, EU, ASIA, NAM4, EUR4, ASIA1, EUR5, EUR7, EUR8]
+---
+id: TF_REL_004
+title: Monitoring configuration missing
+severity: WARNING
+category: reliability
+target: terraform
+resource: terraform
+message: Enhanced monitoring or insights are disabled on a key resource
+pass_message: Key resources have monitoring enabled
+description: |
+  Without detailed metrics and insights, performance problems and capacity
+  limits are only discovered during an outage.
+remediation: |
+  Enable RDS Performance Insights / enhanced monitoring, ECS Container
+  Insights, EC2 detailed monitoring, AKS / GKE monitoring integrations.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            in: [aws_db_instance, aws_rds_cluster_instance]
+          - not: { path: attrs.performance_insights_enabled, equals: true }
+          - any:
+              - path: attrs.monitoring_interval
+                exists: false
+              - path: attrs.monitoring_interval
+                equals: 0
+      - all:
+          - path: type
+            equals: aws_ecs_cluster
+          - not:
+              path: attrs.setting[*]
+              where:
+                all:
+                  - path: name
+                    equals: containerInsights
+                  - path: value
+                    in: [enabled, enhanced]
+      - all:
+          - path: type
+            in: [aws_instance, aws_launch_template]
+          - not: { path: attrs.monitoring, equals: true }
+          - not: { path: attrs.monitoring.enabled, equals: true }
+      - all:
+          - path: type
+            equals: azurerm_kubernetes_cluster
+          - path: attrs.oms_agent
+            exists: false
+          - path: attrs.monitor_metrics
+            exists: false
+      - all:
+          - path: type
+            equals: google_container_cluster
+          - path: attrs.monitoring_service
+            equals: none
+---
+id: TF_REL_005
+title: Alerting configuration missing
+severity: WARNING
+category: reliability
+target: terraform
+resource: terraform
+message: No alarms or alert policies are defined
+pass_message: Alerting resources are defined
+description: |
+  Metrics without alerts mean failures are noticed by users first.
+remediation: |
+  Define alarms / alert policies for availability, errors, latency and
+  saturation (CloudWatch alarms, Azure Monitor alerts, Cloud Monitoring alert
+  policies, or Datadog / Grafana / PagerDuty resources).
+query:
+  not:
+    path: resources[*]
+    where:
+      path: type
+      in: [aws_cloudwatch_metric_alarm, aws_cloudwatch_composite_alarm, azurerm_monitor_metric_alert, azurerm_monitor_scheduled_query_rules_alert_v2, azurerm_monitor_activity_log_alert, google_monitoring_alert_policy, datadog_monitor, newrelic_alert_policy, newrelic_nrql_alert_condition, grafana_rule_group, pagerduty_service, opsgenie_team]
+---
+id: TF_REL_006
+title: Auto-scaling configuration missing
+severity: WARNING
+category: reliability
+target: terraform
+resource: terraform
+message: A service or node group cannot scale with load
+pass_message: Services and node groups can scale
+description: |
+  Fixed capacity either wastes money or falls over under traffic peaks.
+remediation: |
+  Attach scaling policies (aws_appautoscaling_target / policy for ECS and
+  DynamoDB, min < max for ASGs and node groups, cluster autoscaler / node pool
+  autoscaling on AKS and GKE).
+query:
+  any:
+    - all:
+        - path: resources[*]
+          where:
+            path: type
+            equals: aws_ecs_service
+        - path: summary.types.aws_appautoscaling_target
+          exists: false
+    - all:
+        - path: resources[*]
+          where:
+            all:
+              - path: type
+                equals: aws_dynamodb_table
+              - path: attrs.billing_mode
+                equals: PROVISIONED
+        - path: summary.types.aws_appautoscaling_target
+          exists: false
+    - path: resources[*]
+      where:
+        any:
+          - all:
+              - path: type
+                equals: aws_autoscaling_group
+              - path: attrs.max_size
+                equals_ref: attrs.min_size
+          - all:
+              - path: type
+                equals: aws_eks_node_group
+              - path: attrs.scaling_config.max_size
+                equals_ref: attrs.scaling_config.min_size
+          - all:
+              - path: type
+                equals: azurerm_kubernetes_cluster
+              - not: { path: attrs.default_node_pool.auto_scaling_enabled, equals: true }
+              - not: { path: attrs.default_node_pool.enable_auto_scaling, equals: true }
+          - all:
+              - path: type
+                equals: google_container_node_pool
+              - path: attrs.autoscaling
+                exists: false
+---
+id: TF_REL_007
+title: Health checks not configured
+severity: WARNING
+category: reliability
+target: terraform
+resource: terraform
+message: Traffic is routed without an explicit health check
+pass_message: Traffic targets have health checks
+description: |
+  Without health checks (or with defaults that only test "/"), traffic keeps
+  flowing to broken instances and failover never triggers.
+remediation: |
+  Configure an application-level health check path on target groups, use
+  health_check_type = "ELB" on ASGs behind load balancers, and attach health
+  checks to failover DNS records, LB probes and backend services.
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            in: [aws_lb_target_group, aws_alb_target_group]
+          - any:
+              - path: attrs.health_check
+                exists: false
+              - path: attrs.health_check.enabled
+                equals: false
+      - all:
+          - path: type
+            equals: aws_autoscaling_group
+          - path: attrs.target_group_arns
+            exists: true
+          - not: { path: attrs.health_check_type, equals: ELB }
+      - all:
+          - path: type
+            equals: aws_route53_record
+          - path: attrs.failover_routing_policy
+            exists: true
+          - path: attrs.health_check_id
+            exists: false
+      - all:
+          - path: type
+            equals: azurerm_lb
+          - not: { path: 'referenced_by[*].type', equals: azurerm_lb_probe }
+      - all:
+          - path: type
+            in: [google_compute_backend_service, google_compute_region_backend_service]
+          - path: attrs.health_checks
+            exists: false
+---
+id: TF_REL_008
+title: Recovery objectives not defined
+severity: WARNING
+category: reliability
+target: terraform
+resource: terraform
+message: A stateful resource has no RPO / RTO tags
+pass_message: Stateful resources document RPO / RTO
+description: |
+  Without documented recovery point and recovery time objectives, backup
+  frequency, retention and DR design cannot be validated against business
+  needs.
+remediation: |
+  Tag stateful resources with rpo and rto (e.g. rpo = "15m", rto = "1h") and
+  align backup schedules and replication with them.
+enabled: false
+query:
+  path: resources[*]
+  where:
+    all:
+      - path: stateful
+        equals: true
+      - path: taggable
+        equals: true
+      - path: tags.rpo
+        exists: false
+      - path: tags.RPO
+        exists: false
+      - path: tags.rto
+        exists: false
+      - path: tags.RTO
+        exists: false
+
+# -----------------------------------------------------------------------------
+# PRODUCTION READINESS
+# -----------------------------------------------------------------------------
+---
+id: TF_PROD_001
+title: Production resource uses development sizing
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: A production resource uses a burstable, free-tier or shared-core size
+pass_message: Production resources use production sizing
+description: |
+  Micro / small burstable instances and shared-core database tiers run out of
+  CPU credits or memory under real load.
+remediation: |
+  Use production-grade instance classes and tiers in the prod environment,
+  and size them from load tests.
+enabled: false
+query:
+  all:
+    - path: context.environment
+      matches: '(?i)^(prod|production|prd|live)$'
+    - path: resources[*]
+      where:
+        any:
+          - path: attrs.instance_class
+            matches: '^db\.t[234]g?\.(micro|small)$'
+          - path: attrs.instance_type
+            matches: '^t[234]g?\.(nano|micro|small)$'
+          - path: attrs.node_type
+            matches: '^cache\.t[234]g?\.(micro|small)$'
+          - path: attrs.sku_name
+            matches: '^(B_|Basic|B1|B2|F1|D1|Free)'
+          - path: attrs.size
+            matches: '^Standard_B[12]'
+          - path: attrs.settings.tier
+            in: [db-f1-micro, db-g1-small]
+          - path: attrs.machine_type
+            in: [f1-micro, g1-small, e2-micro, e2-small]
+---
+id: TF_PROD_002
+title: Security scanning integration missing
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: No IaC security scanner runs in CI or pre-commit
+pass_message: An IaC security scanner runs in CI
+description: |
+  Misconfigurations are only caught by manual review, after they reach the
+  cloud.
+remediation: |
+  Run Checkov, Trivy (config), tfsec, KICS or Terrascan in CI on every pull
+  request, and optionally in pre-commit.
+enabled: false
+query:
+  not:
+    path: context.ci_text[*]
+    where:
+      path: text
+      matches: '(?i)\b(checkov|tfsec|trivy\s+(config|fs)|trivy-action|kics|terrascan|snyk\s+iac|regula|wiz\s+iac)\b'
+---
+id: TF_PROD_003
+title: Infrastructure drift detection missing
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: Nothing checks regularly whether real infrastructure matches the code
+pass_message: Drift detection is configured
+description: |
+  Manual console changes and failed applies make the cloud drift away from
+  the code; the next apply then reverts or breaks things unexpectedly.
+remediation: |
+  Run a scheduled terraform plan -detailed-exitcode that alerts on changes, or
+  use the drift detection of HCP Terraform, Spacelift, env0 or similar.
+enabled: false
+query:
+  all:
+    - not:
+        path: context.ci_text[*]
+        where:
+          path: text
+          matches: '(?i)(-detailed-exitcode|driftctl|drift[-_ ]detection|tofu\s+plan[^\n]*-detailed)'
+    - path: terraform.cloud
+      exists: false
+---
+id: TF_PROD_004
+title: Compliance validation missing
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: No policy-as-code checks validate plans against organizational policies
+pass_message: Policy-as-code validation is configured
+description: |
+  Organizational rules (allowed regions, required tags, approved instance
+  types) are not enforced automatically.
+remediation: |
+  Evaluate plans with OPA / Conftest, Sentinel, terraform-compliance or custom
+  Checkov policies in CI.
+enabled: false
+query:
+  all:
+    - not:
+        path: context.ci_text[*]
+        where:
+          path: text
+          matches: '(?i)\b(conftest|opa\s+eval|sentinel|terraform-compliance|regula|checkov[^\n]*--external-checks)\b'
+    - not: { path: 'context.files[*]', matches: '(\.rego|\.sentinel)$|(^|/)policies?/' }
+---
+id: TF_PROD_005
+title: Change approval workflow missing
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: Changes are applied without a reviewed plan and approval gate
+pass_message: Changes go through an approval gate
+description: |
+  Auto-approved applies, or applies run from laptops, let unreviewed changes
+  reach production.
+remediation: |
+  Apply only through CI after review of the plan: GitHub environments with
+  required reviewers, GitLab manual jobs, Atlantis apply requirements, or
+  HCP Terraform run approval.
+enabled: false
+query:
+  any:
+    - path: context.ci_text[*]
+      where:
+        all:
+          - path: text
+            matches: '(terraform|tofu)\s+apply[^\n]*-auto-approve'
+          - not: { path: text, matches: '(?i)(environment:|when:\s*manual|input\s*\(|approval|required_reviewers|manual_approval)' }
+    - all:
+        - not: { path: 'context.ci_text[*].text', matches: '(terraform|tofu)\s+apply' }
+        - not: { path: 'context.files[*]', matches: '(^|/)atlantis\.ya?ml$' }
+        - path: terraform.cloud
+          exists: false
+---
+id: TF_PROD_006
+title: Resource deletion protection disabled
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: A critical resource can be deleted without protection or a final snapshot
+pass_message: Critical resources have deletion protection
+description: |
+  A mistaken destroy or rename deletes databases, load balancers or clusters
+  along with their data.
+remediation: |
+  Enable deletion_protection, keep skip_final_snapshot = false, and add
+  lifecycle { prevent_destroy = true } to stateful resources.
+enabled: false
+query:
+  path: resources[*]
+  where:
+    any:
+      - all:
+          - path: type
+            in: [aws_db_instance, aws_rds_cluster, aws_docdb_cluster, aws_neptune_cluster]
+          - any:
+              - not: { path: attrs.deletion_protection, equals: true }
+              - path: attrs.skip_final_snapshot
+                equals: true
+      - all:
+          - path: type
+            equals: aws_dynamodb_table
+          - not: { path: attrs.deletion_protection_enabled, equals: true }
+      - all:
+          - path: type
+            in: [aws_lb, aws_alb]
+          - not: { path: attrs.enable_deletion_protection, equals: true }
+      - all:
+          - path: type
+            in: [google_sql_database_instance, google_container_cluster]
+          - path: attrs.deletion_protection
+            equals: false
+      - all:
+          - path: stateful
+            equals: true
+          - not: { path: lifecycle.prevent_destroy, equals: true }
+          - path: type
+            matches: '^(azurerm_(mssql_server|mssql_database|postgresql_flexible_server|mysql_flexible_server|cosmosdb_account|storage_account|key_vault)|google_(storage_bucket|spanner_instance|bigtable_instance))$'
+---
+id: TF_PROD_007
+title: Critical resource lacks backup validation
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: Backups exist but restores are never tested
+pass_message: Backup restores are tested
+description: |
+  Backups that have never been restored often fail when needed (missing
+  permissions, keys, or incomplete data).
+remediation: |
+  Schedule automated restore tests (aws_backup_restore_testing_plan) or a
+  CI / scheduled job that restores the latest backup and validates it.
+enabled: false
+query:
+  all:
+    - any:
+        - path: summary.types.aws_backup_plan
+          gte: 1
+        - path: resources[*]
+          where:
+            path: attrs.backup_retention_period
+            gte: 1
+        - path: summary.types.azurerm_backup_policy_vm
+          gte: 1
+        - path: resources[*]
+          where:
+            path: attrs.settings.backup_configuration.enabled
+            equals: true
+    - path: summary.types.aws_backup_restore_testing_plan
+      exists: false
+    - not: { path: 'context.ci_text[*].text', matches: '(?i)restore[-_ ]?(test|verify|validation|drill)' }
+---
+id: TF_PROD_008
+title: Production readiness validation missing
+severity: WARNING
+category: operational
+target: terraform
+resource: terraform
+message: Versions are not pinned, the lock file is missing, or CI does not validate the code
+pass_message: Versions are pinned and CI validates the code
+description: |
+  Unpinned Terraform / provider versions and a missing lock file change
+  behaviour between runs; without terraform validate and plan in CI, broken
+  changes are found during apply.
+remediation: |
+  Set required_version and provider version constraints, commit
+  .terraform.lock.hcl, pin module versions, and run fmt -check, validate and
+  plan on every pull request.
+enabled: false
+query:
+  any:
+    - all:
+        - path: context.is_root_module
+          equals: true
+        - path: terraform.required_version
+          exists: false
+    - path: terraform.required_providers.*
+      where:
+        any:
+          - path: version
+            exists: false
+          - path: version
+            matches: '^\s*>=?[^,]*$'
+    - all:
+        - path: context.is_root_module
+          equals: true
+        - not: { path: 'context.files[*]', matches: '(^|/)\.terraform\.lock\.hcl$' }
+    - path: module_calls[*]
+      where:
+        all:
+          - path: source
+            not_matches: '^(\./|\.\./)'
+          - path: version
+            exists: false
+          - not: { path: source, matches: '\?ref=(v?[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{40})' }
+    - not: { path: 'context.ci_text[*].text', matches: '(terraform|tofu)\s+(validate|plan)' }

@@ -1,0 +1,10 @@
+services:
+  app:
+    image: x:1
+    depends_on: [db]
+  debug:
+    image: y:1
+    profiles: [debug]
+  api:
+    image: z:1
+    depends_on: [debug]

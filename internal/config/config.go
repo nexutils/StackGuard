@@ -41,6 +41,8 @@ type Config struct {
 	MinScore int `mapstructure:"min_score" yaml:"min_score,omitempty"`
 	// Format is the default output format.
 	Format string `mapstructure:"format" yaml:"format,omitempty"`
+	// Profile selects a scan profile: quick, standard (default), or strict.
+	Profile string `mapstructure:"profile" yaml:"profile,omitempty"`
 }
 
 // Default returns the configuration used when nothing is configured.
@@ -54,6 +56,8 @@ type Resolved struct {
 	SeverityOverrides map[string]models.Severity
 	// FailOn is nil when failing on findings is disabled.
 	FailOn *models.Severity
+	// Profile is the parsed scan profile.
+	Profile models.Profile
 }
 
 // Resolve validates the configuration. Rule IDs are normalised to upper case
@@ -81,6 +85,11 @@ func (c Config) Resolve() (Resolved, error) {
 	if c.MinScore < 0 || c.MinScore > 100 {
 		return r, fmt.Errorf("min_score must be between 0 and 100, got %d", c.MinScore)
 	}
+	profile, err := models.ParseProfile(c.Profile)
+	if err != nil {
+		return r, fmt.Errorf("profile: %w", err)
+	}
+	r.Profile = profile
 	return r, nil
 }
 

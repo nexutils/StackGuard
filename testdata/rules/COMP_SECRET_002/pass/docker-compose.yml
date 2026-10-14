@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    environment: ["STRIPE_API_KEY=${STRIPE_API_KEY}", "GITHUB_TOKEN_FILE=/run/secrets/gh"]

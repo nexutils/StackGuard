@@ -1,0 +1,10 @@
+pipeline {
+    agent { label 'linux' }
+    stages {
+        stage('Build') {
+            steps {
+                writeFile file: 'kubeconfig', text: 'secret'
+            }
+        }
+    }
+}

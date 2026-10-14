@@ -1,0 +1,6 @@
+services:
+  app:
+    image: x:1
+secrets:
+  token:
+    environment: API_TOKEN

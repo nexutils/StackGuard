@@ -96,6 +96,101 @@ func TestConsoleVariants(t *testing.T) {
 	if !strings.HasPrefix(string(clean), "✓ No issues found") {
 		t.Errorf("clean report:\n%s", clean)
 	}
+
+	summary := render(t, "console", reporters.Options{}, sampleReport())
+	if !bytes.Contains(summary, []byte("✓ 1 passed")) || !bytes.Contains(summary, []byte("compose 1")) {
+		t.Errorf("default console should summarise passed rules:\n%s", summary)
+	}
+	if bytes.Contains(summary, []byte("Containers use pinned image versions")) {
+		t.Errorf("default console should not list each passed rule:\n%s", summary)
+	}
+	if !bytes.Contains(summary, []byte("--show-passed")) {
+		t.Errorf("summary should hint at --show-passed:\n%s", summary)
+	}
+
+	full := render(t, "console", reporters.Options{ShowPassed: true}, sampleReport())
+	if !bytes.Contains(full, []byte("Containers use pinned image versions")) {
+		t.Errorf("--show-passed should list each passed rule:\n%s", full)
+	}
+}
+
+func TestJSONOmitSkipped(t *testing.T) {
+	// The sample report's tf rule is skipped (no terraform resources scanned).
+	var full struct {
+		Rules []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(render(t, "json", reporters.Options{}, sampleReport()), &full); err != nil {
+		t.Fatal(err)
+	}
+	var skippedSeen bool
+	for _, r := range full.Rules {
+		if r.Status == "skipped" {
+			skippedSeen = true
+		}
+	}
+	if !skippedSeen {
+		t.Fatal("default JSON should include skipped rules (sample has TF_SEC_001 skipped)")
+	}
+
+	var trimmed struct {
+		Rules []struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal(render(t, "json", reporters.Options{OmitSkipped: true}, sampleReport()), &trimmed); err != nil {
+		t.Fatal(err)
+	}
+	if len(trimmed.Rules) >= len(full.Rules) {
+		t.Errorf("OmitSkipped should drop rules: got %d, full had %d", len(trimmed.Rules), len(full.Rules))
+	}
+	for _, r := range trimmed.Rules {
+		if r.Status == "skipped" {
+			t.Errorf("OmitSkipped left a skipped rule: %s", r.ID)
+		}
+		if r.Status != "passed" && r.Status != "failed" {
+			t.Errorf("unexpected status %q for %s", r.Status, r.ID)
+		}
+	}
+}
+
+func TestSARIFOmitSkipped(t *testing.T) {
+	var doc struct {
+		Runs []struct {
+			Tool struct {
+				Driver struct {
+					Rules []struct {
+						ID string `json:"id"`
+					} `json:"rules"`
+				} `json:"driver"`
+			} `json:"tool"`
+			Results []struct {
+				RuleID    string `json:"ruleId"`
+				RuleIndex int    `json:"ruleIndex"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(render(t, "sarif", reporters.Options{OmitSkipped: true}, sampleReport()), &doc); err != nil {
+		t.Fatal(err)
+	}
+	run := doc.Runs[0]
+	for _, r := range run.Tool.Driver.Rules {
+		if r.ID == "TF_SEC_001" { // the sample's skipped rule
+			t.Error("OmitSkipped should drop skipped rule TF_SEC_001 from driver.rules")
+		}
+	}
+	// ruleIndex references must still resolve to the correct rule after trimming.
+	for _, res := range run.Results {
+		if res.RuleIndex < 0 || res.RuleIndex >= len(run.Tool.Driver.Rules) {
+			t.Fatalf("ruleIndex %d out of range (%d rules)", res.RuleIndex, len(run.Tool.Driver.Rules))
+		}
+		if got := run.Tool.Driver.Rules[res.RuleIndex].ID; got != res.RuleID {
+			t.Errorf("ruleIndex %d points at %s, want %s", res.RuleIndex, got, res.RuleID)
+		}
+	}
 }
 
 // TestSARIFShape checks the properties GitHub code scanning relies on.

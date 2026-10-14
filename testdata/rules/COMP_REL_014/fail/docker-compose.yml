@@ -1,0 +1,8 @@
+services:
+  app:
+    image: x:1
+    depends_on:
+      db:
+        condition: service_healthy
+  db:
+    image: y:1

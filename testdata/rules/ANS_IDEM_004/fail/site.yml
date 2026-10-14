@@ -1,0 +1,7 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: run
+      ansible.builtin.command: /bin/false
+      ignore_errors: true

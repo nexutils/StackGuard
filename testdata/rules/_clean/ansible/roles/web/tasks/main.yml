@@ -1,0 +1,7 @@
+---
+- name: Deploy app config
+  become: true
+  ansible.builtin.copy:
+    src: app.conf
+    dest: /etc/myapp/app.conf
+    mode: "0644"

@@ -1,3 +1,4 @@
+// Package models defines the core data types used throughout StackGuard.
 package models
 
 // Finding is a single rule violation on a single resource.

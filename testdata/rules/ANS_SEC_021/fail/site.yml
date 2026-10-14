@@ -1,0 +1,7 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: whoami
+      become_user: root
+      ansible.builtin.command: whoami

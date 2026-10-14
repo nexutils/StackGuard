@@ -1,0 +1,14 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: t1
+      ansible.builtin.ping:
+    - name: t2
+      ansible.builtin.ping:
+    - name: t3
+      ansible.builtin.ping:
+    - name: t4
+      ansible.builtin.ping:
+    - name: t5
+      ansible.builtin.ping:

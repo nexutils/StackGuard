@@ -1,0 +1,3 @@
+FROM alpine:3.19
+EXPOSE 80 443 8080
+CMD ["app"]

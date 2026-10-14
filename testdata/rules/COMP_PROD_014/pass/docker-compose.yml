@@ -1,0 +1,4 @@
+services:
+  adminer:
+    image: adminer:4.8.1
+    profiles: [debug]

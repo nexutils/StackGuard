@@ -1,0 +1,5 @@
+services:
+  app:
+    image: x:1
+    environment:
+      DB_PASSWORD: ${DB_PASSWORD:?required}

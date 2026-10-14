@@ -1,0 +1,1 @@
+image: {repository: ghcr.io/example-org/app, tag: "1"}

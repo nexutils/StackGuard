@@ -1,0 +1,9 @@
+services:
+  app:
+    image: x:1
+    depends_on:
+      cache:
+        condition: service_started
+        required: false
+  cache:
+    image: y:1

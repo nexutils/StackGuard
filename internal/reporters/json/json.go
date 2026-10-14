@@ -65,6 +65,9 @@ func (j *Reporter) Report(w io.Writer, r *models.Report) error {
 		doc.Diagnostics = []models.Diagnostic{}
 	}
 	for _, rr := range r.Results {
+		if j.opts.OmitSkipped && rr.Status == models.RuleSkipped {
+			continue
+		}
 		out := RuleResult{ID: rr.RuleID, Status: rr.Status, Evaluated: rr.Evaluated, Findings: rr.Findings}
 		if rr.Rule != nil {
 			out.Title, out.Severity, out.Category, out.Target = rr.Rule.Title, rr.Rule.Severity, rr.Rule.Category, rr.Rule.Target

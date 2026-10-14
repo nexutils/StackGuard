@@ -1,0 +1,8 @@
+name: CI
+on: [push]
+permissions: write-all
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4

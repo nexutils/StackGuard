@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: user
+      ansible.builtin.user:
+        name: app
+        password: plaintextpassword

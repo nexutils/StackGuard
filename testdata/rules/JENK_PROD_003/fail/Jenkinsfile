@@ -1,0 +1,13 @@
+pipeline {
+    agent { label 'linux' }
+    stages {
+        stage('Deploy Prod') {
+            input {
+                message 'Deploy?'
+            }
+            steps {
+                sh 'kubectl apply -f k8s/'
+            }
+        }
+    }
+}

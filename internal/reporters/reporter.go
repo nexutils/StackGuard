@@ -22,6 +22,9 @@ type Options struct {
 	// ShowPassed lists every passed rule in the console reporter. When false
 	// (the default) passed rules are collapsed to a summary line.
 	ShowPassed bool
+	// OmitSkipped drops rules with status "skipped" from the JSON report's
+	// rules array. When false (the default) the array is the full ledger.
+	OmitSkipped bool
 	// ToolVersion is embedded in machine-readable formats.
 	ToolVersion string
 	// BaseDir is used to make file paths relative (SARIF requires relative

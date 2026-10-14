@@ -1,0 +1,8 @@
+services:
+  app:
+    image: portainer/agent:2.19
+    volumes:
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+        read_only: true

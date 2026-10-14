@@ -327,7 +327,6 @@
   .stat-tile .v .accent { color: var(--accent); }
   .stat-tile .l { margin-top: 7px; font-family: var(--mono); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); }
   .nav-right .gh .cnt { color: var(--text); font-weight: 600; }
-  .stats-note { margin: 12px auto 0; color: var(--faint); font-family: var(--mono); font-size: 11.5px; }
 
   /* ----- footer ----- */
   footer { border-top: 1px solid var(--border); padding: 48px 0 56px; }
@@ -798,8 +797,8 @@
         <p class="cta-sub">Then: stackguard scan .</p>
 
         <!-- Live stats pulled from the GitHub API at runtime. Each tile stays hidden
-             until it has a real, non-zero value, so a young repo never shows a
-             discouraging "0". No numbers are hardcoded. -->
+             until it has a real, non-zero value, so the repo never shows a "0".
+             No numbers are hardcoded. -->
         <div class="stats-strip" id="liveStats" hidden aria-label="Project activity">
           <div class="stat-tile" data-stat="downloads" hidden>
             <div class="v" data-val></div>
@@ -814,7 +813,6 @@
             <div class="l">Latest release</div>
           </div>
         </div>
-        <p class="stats-note" id="statsNote" hidden>Sample data for preview. Live numbers load from GitHub once the repository is public.</p>
 
         <div class="cta-actions">
           <a class="btn btn-primary" href="https://github.com/nexutils/StackGuard">
@@ -1051,19 +1049,12 @@
   // or rate-limited (the strip simply never appears).
   (function () {
     var REPO = "nexutils/StackGuard";
-    // DEMO shows clearly-labeled sample values so the component is reviewable while
-    // the repo is still private / has no releases. It auto-enables only for local
-    // preview (file://, localhost, or the Lavish server). On the live GitHub Pages
-    // domain it is OFF, so production shows ONLY real GitHub numbers and hides any
-    // zero value. Nothing is ever hardcoded into the published numbers.
-    var h = location.hostname;
-    var DEMO = location.protocol === "file:" || h === "" || h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0";
-
+    // Live stats from the GitHub API. Release mode: only real, non-zero numbers
+    // are shown, and each tile (and the whole strip) stays hidden otherwise.
+    // Nothing is hardcoded; fails silent when offline or rate-limited.
     var strip = document.getElementById("liveStats");
-    var note = document.getElementById("statsNote");
     if (!strip || !window.fetch) return;
     var fmt = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
-    var shownReal = false;
 
     function showTile(name, html) {
       var tile = strip.querySelector('[data-stat="' + name + '"]');
@@ -1074,13 +1065,6 @@
     function reveal() {
       if (strip.querySelector(".stat-tile:not([hidden])")) { strip.hidden = false; strip.classList.add("ready"); }
     }
-    function sampleFallback() {
-      if (shownReal || !DEMO) return;
-      showTile("downloads", '<span class="accent">12.4k</span>');
-      showTile("stars", "840");
-      showTile("version", "v0.3.0");
-      if (note) note.hidden = false;
-    }
 
     var api = "https://api.github.com/repos/" + REPO;
     Promise.allSettled([
@@ -1090,7 +1074,6 @@
       var repo = res[0].value, releases = res[1].value;
 
       if (repo && repo.stargazers_count > 0) {
-        shownReal = true;
         showTile("stars", fmt.format(repo.stargazers_count));
         var nav = document.getElementById("navStars");
         if (nav) nav.textContent = " " + fmt.format(repo.stargazers_count);
@@ -1101,12 +1084,11 @@
           if (!latest && !rel.prerelease && !rel.draft) latest = rel.tag_name;
           (rel.assets || []).forEach(function (a) { downloads += a.download_count || 0; });
         });
-        if (downloads > 0) { shownReal = true; showTile("downloads", '<span class="accent">' + fmt.format(downloads) + "</span>"); }
-        if (latest) { shownReal = true; showTile("version", latest); }
+        if (downloads > 0) showTile("downloads", '<span class="accent">' + fmt.format(downloads) + "</span>");
+        if (latest) showTile("version", latest);
       }
-      sampleFallback();
       reveal();
-    }).catch(sampleFallback);
+    });
   })();
 
   // Copy install command

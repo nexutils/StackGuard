@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    command: ["run", "--token", "ghp_abcdefghijklmnopqrstuvwxyz0123456789"]

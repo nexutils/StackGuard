@@ -1,0 +1,4 @@
+services:
+  app:
+    image: redis:7.2.5
+    command: ["redis-server", "--requirepass", "hunter2"]

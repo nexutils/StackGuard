@@ -1,0 +1,4 @@
+services:
+  app:
+    image: rabbitmq:3.13.3
+    ports: ["15432:5432"]

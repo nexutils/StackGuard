@@ -1,0 +1,10 @@
+name: CI
+on: [push]
+concurrency: {group: ci}
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - run: curl -fsSL https://example.com/file -o f
+        if: failure()

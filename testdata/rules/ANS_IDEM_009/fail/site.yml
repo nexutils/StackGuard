@@ -1,0 +1,9 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: unit
+      ansible.builtin.copy:
+        src: x.service
+        dest: /etc/systemd/system/x.service
+        mode: "0644"

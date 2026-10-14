@@ -1,0 +1,8 @@
+---
+- name: Web
+  hosts: web
+  tasks:
+    - name: install
+      ansible.builtin.apt:
+        name: nginx
+        state: latest

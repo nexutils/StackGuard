@@ -1,0 +1,10 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: write
+      ansible.builtin.copy:
+        src: a
+        dest: /b
+        mode: "0644"
+      check_mode: false

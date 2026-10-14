@@ -187,6 +187,29 @@ func (r *RefCompare) Solve(root any, prefix string, env Env, yield Yield) bool {
 	return true
 }
 
+// RefEquals matches when the value at Path equals the value at Ref, both
+// resolved against the same root (equals_ref). Unlike gt_ref / lt_ref it is not
+// numeric: scalars compare by value and maps/lists structurally, so a rule can
+// ask "is the liveness probe identical to the readiness probe?".
+type RefEquals struct {
+	Path Path
+	Ref  Path
+}
+
+func (r *RefEquals) Solve(root any, prefix string, env Env, yield Yield) bool {
+	for _, m := range r.Path.ResolveEnv(root, prefix, env) {
+		for _, ref := range r.Ref.ResolveEnv(root, prefix, m.Env) {
+			if !operators.Equal(m.Value, ref.Value) {
+				continue
+			}
+			if !yield(ref.Env, Evidence{Path: m.Path, Value: m.Value}) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // CountAtLeast matches when at least N of the values its path resolves to
 // satisfy Match. It backs the `count_gte` modifier: where a plain leaf matches
 // if *any* element under a wildcard matches, count_gte requires a minimum

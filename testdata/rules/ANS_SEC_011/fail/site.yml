@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: db
+      community.mysql.mysql_user:
+        name: app
+        password: plaintextpw

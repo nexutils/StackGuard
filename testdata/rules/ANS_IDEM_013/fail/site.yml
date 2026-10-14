@@ -1,0 +1,7 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: run
+      ansible.builtin.command: echo hi
+      when: "{{ do_it }}"

@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: app}
+spec:
+  template:
+    metadata: {labels: {app: app}}
+    spec:
+      containers:
+        - name: app
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          env:
+            - name: DB_PASSWORD
+              value: "{{ .Values.dbPassword }}"

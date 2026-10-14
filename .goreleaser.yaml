@@ -31,6 +31,41 @@ archives:
       - LICENSE
       - README.md
 
+brews:
+  - name: stackguard
+    repository:
+      owner: nexutils
+      name: homebrew-tap
+      token: '{{ index .Env "TAP_GITHUB_TOKEN" }}'
+    directory: Formula
+    homepage: "https://github.com/nexutils/StackGuard"
+    description: "Scan infrastructure and deployment configuration for production-readiness issues"
+    license: "Apache-2.0"
+    skip_upload: '{{ if index .Env "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    test: |
+      system "#{bin}/stackguard", "version"
+
+# Scoop bucket. Publishes a manifest to github.com/nexutils/scoop-bucket.
+# Install with: scoop bucket add nexutils https://github.com/nexutils/scoop-bucket
+#               scoop install stackguard
+# Same token requirement and skip-until-configured guard as the Homebrew tap.
+scoops:
+  - name: stackguard
+    repository:
+      owner: nexutils
+      name: scoop-bucket
+      token: '{{ index .Env "TAP_GITHUB_TOKEN" }}'
+    homepage: "https://github.com/nexutils/StackGuard"
+    description: "Scan infrastructure and deployment configuration for production-readiness issues"
+    license: "Apache-2.0"
+    skip_upload: '{{ if index .Env "TAP_GITHUB_TOKEN" }}false{{ else }}true{{ end }}'
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+
 checksum:
   name_template: checksums.txt
 

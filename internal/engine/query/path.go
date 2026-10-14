@@ -80,14 +80,14 @@ func ParsePath(s string) (Path, error) {
 	expectSegment := true
 	for i < len(s) {
 		c := s[i]
-		switch {
-		case c == '.':
+		switch c {
+		case '.':
 			if expectSegment {
 				return p, fmt.Errorf("path %q: empty segment at offset %d", s, i)
 			}
 			expectSegment = true
 			i++
-		case c == '[':
+		case '[':
 			seg, n, err := parseBracket(s, i)
 			if err != nil {
 				return p, err
@@ -95,7 +95,7 @@ func ParsePath(s string) (Path, error) {
 			p.segs = append(p.segs, seg)
 			expectSegment = false
 			i += n
-		case c == '"':
+		case '"':
 			if !expectSegment {
 				return p, fmt.Errorf("path %q: missing '.' before quoted key at offset %d", s, i)
 			}
@@ -247,6 +247,25 @@ func resolve(v any, segs []segment, prefix string, env Env, out *[]Match) {
 	s, rest := segs[0], segs[1:]
 	switch s.kind {
 	case segKey:
+		// A non-numeric key applied to a list applies to each element, so a path
+		// can read through single (or repeated) nested blocks without an explicit
+		// [*] — e.g. Terraform models nested blocks as lists of maps and a rule
+		// reads attrs.settings.ip_configuration.ipv4_enabled. A numeric key still
+		// indexes the list (handled by step below).
+		if !isIndex(s.key) {
+			switch list := v.(type) {
+			case []any:
+				for i, e := range list {
+					resolve(e, segs, models.JoinIndex(prefix, i), env, out)
+				}
+				return
+			case []map[string]any:
+				for i, e := range list {
+					resolve(e, segs, models.JoinIndex(prefix, i), env, out)
+				}
+				return
+			}
+		}
 		if next, key, ok := step(v, s.key); ok {
 			resolve(next, rest, key(prefix), env, out)
 		}

@@ -1,0 +1,9 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: bg
+      ansible.builtin.command: /long/job
+      async: 300
+      poll: 0
+      changed_when: false

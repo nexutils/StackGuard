@@ -1,0 +1,15 @@
+pipeline {
+    agent any
+    stages {
+        stage('Setup') {
+            steps {
+                sh 'curl -sSL https://example.com/install.sh | sh'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'make test'
+            }
+        }
+    }
+}

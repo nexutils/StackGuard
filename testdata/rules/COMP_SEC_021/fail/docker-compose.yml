@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    security_opt: ["label=disable"]

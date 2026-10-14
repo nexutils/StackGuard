@@ -1,0 +1,7 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: old
+      ec2:
+        instance_type: t2.micro

@@ -1,0 +1,5 @@
+services:
+  app:
+    image: bitnami/redis:7.2.5
+    environment:
+      REDIS_PASSWORD_FILE: /run/secrets/redis

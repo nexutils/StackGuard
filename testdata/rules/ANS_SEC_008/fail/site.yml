@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: get
+      ansible.builtin.get_url:
+        url: https://example.com/install.sh
+        dest: /tmp/i.sh

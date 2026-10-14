@@ -1,0 +1,186 @@
+[
+  {
+    "target": "jenkins",
+    "type": "jenkins",
+    "name": "pipeline",
+    "file": "jenkins/Jenkinsfile",
+    "line": 1,
+    "properties": {
+      "agents": [
+        {
+          "args": "",
+          "images": [],
+          "label": "linux",
+          "type": "label",
+          "yaml": ""
+        }
+      ],
+      "context": {
+        "files": null
+      },
+      "env_entries": [
+        {
+          "key": "TOKEN",
+          "value": "credentials('api-token')",
+          "value_kind": "credentials"
+        }
+      ],
+      "libraries": [],
+      "pipeline": {
+        "has_global_timeout": true,
+        "kind": "declarative",
+        "options_names": [
+          "timeout",
+          "disableConcurrentBuilds"
+        ],
+        "post_conditions": [
+          "failure"
+        ],
+        "triggers": []
+      },
+      "stages": [
+        {
+          "failFast": false,
+          "gated": false,
+          "has_input": false,
+          "has_timeout": false,
+          "has_when": false,
+          "is_deploy": false,
+          "name": "Build",
+          "options_names": [],
+          "parallel": false,
+          "post_conditions": null,
+          "post_step_names": [],
+          "scripts": "echo \"{ brace in string\"\n\n                    make build\n                ",
+          "step_names": [
+            "sh"
+          ],
+          "targets_prod": false
+        },
+        {
+          "failFast": false,
+          "gated": false,
+          "has_input": false,
+          "has_timeout": false,
+          "has_when": true,
+          "is_deploy": true,
+          "name": "Deploy",
+          "options_names": [],
+          "parallel": false,
+          "post_conditions": null,
+          "post_step_names": [],
+          "scripts": "./deploy.sh",
+          "step_names": [
+            "sh"
+          ],
+          "targets_prod": false,
+          "when": "branch 'main'"
+        }
+      ],
+      "steps": [
+        {
+          "agent": {
+            "label": "linux",
+            "type": "label"
+          },
+          "args": "echo \"{ brace in string\"",
+          "credentials_in_scope": true,
+          "enclosing": [],
+          "in_post": false,
+          "name": "sh",
+          "post_condition": "",
+          "quote": "single",
+          "script": "echo \"{ brace in string\"",
+          "stage_has_timeout": false
+        },
+        {
+          "agent": {
+            "label": "linux",
+            "type": "label"
+          },
+          "args": "\n                    make build\n                ",
+          "credentials_in_scope": true,
+          "enclosing": [],
+          "in_post": false,
+          "name": "sh",
+          "post_condition": "",
+          "quote": "triple_double",
+          "script": "\n                    make build\n                ",
+          "stage_has_timeout": false
+        },
+        {
+          "agent": {
+            "label": "linux",
+            "type": "label"
+          },
+          "args": "./deploy.sh",
+          "credentials_in_scope": true,
+          "enclosing": [],
+          "in_post": false,
+          "name": "sh",
+          "post_condition": "",
+          "quote": "single",
+          "script": "./deploy.sh",
+          "stage_has_timeout": false
+        },
+        {
+          "agent": {
+            "label": "linux",
+            "type": "label"
+          },
+          "args": "'failed' }",
+          "credentials_in_scope": true,
+          "enclosing": [],
+          "in_post": true,
+          "name": "echo",
+          "post_condition": "failure",
+          "quote": "",
+          "script": "",
+          "stage_has_timeout": false
+        }
+      ],
+      "strings": [
+        "\n                    make build\n                ",
+        "./deploy.sh",
+        "Build",
+        "Deploy",
+        "HOURS",
+        "api-token",
+        "echo \"{ brace in string\"",
+        "failed",
+        "linux",
+        "main"
+      ],
+      "text": "// A comment with a fake stage('Commented') { }\npipeline {\n    agent {\n        label 'linux'\n    }\n    options {\n        timeout(time: 1, unit: 'HOURS')\n        disableConcurrentBuilds()\n    }\n    environment {\n        TOKEN = credentials('api-token')\n    }\n    stages {\n        stage('Build') {\n            steps {\n                sh 'echo \"{ brace in string\"'\n                sh \"\"\"\n                    make build\n                \"\"\"\n            }\n        }\n        stage('Deploy') {\n            when { branch 'main' }\n            steps {\n                sh(script: './deploy.sh', returnStatus: true)\n            }\n        }\n    }\n    post {\n        failure { echo 'failed' }\n    }\n}\n"
+    },
+    "locations": {
+      "agents.0": {
+        "line": 3
+      },
+      "env_entries.0": {
+        "line": 10
+      },
+      "pipeline": {
+        "line": 2
+      },
+      "stages.0": {
+        "line": 14
+      },
+      "stages.1": {
+        "line": 22
+      },
+      "steps.0": {
+        "line": 16
+      },
+      "steps.1": {
+        "line": 17
+      },
+      "steps.2": {
+        "line": 25
+      },
+      "steps.3": {
+        "line": 30
+      }
+    }
+  }
+]

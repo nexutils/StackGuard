@@ -1,0 +1,101 @@
+{
+  "schema_version": "1",
+  "tool": {
+    "name": "stackguard",
+    "version": "1.2.3"
+  },
+  "score": 87,
+  "summary": {
+    "total": 87,
+    "max": 100,
+    "errors": 1,
+    "warnings": 1,
+    "infos": 0
+  },
+  "findings": [
+    {
+      "rule_id": "COMP_SEC_001",
+      "title": "Privileged container",
+      "severity": "ERROR",
+      "category": "security",
+      "target": "compose",
+      "file": "docker-compose.yml",
+      "resource": "api",
+      "message": "Service 'api' runs in privileged mode \u003cb\u003e",
+      "remediation": "Remove `privileged: true`.",
+      "line": 4,
+      "column": 5,
+      "path": "privileged",
+      "fingerprint": "aaaa"
+    },
+    {
+      "rule_id": "COMP_OPS_001",
+      "title": "Missing memory limit",
+      "severity": "WARNING",
+      "category": "operational",
+      "target": "compose",
+      "file": "docker-compose.yml",
+      "resource": "redis",
+      "message": "Service 'redis' has no memory limit",
+      "line": 9,
+      "fingerprint": "bbbb"
+    }
+  ],
+  "rules": [
+    {
+      "id": "COMP_OPS_001",
+      "title": "Missing memory limit",
+      "severity": "WARNING",
+      "category": "operational",
+      "target": "compose",
+      "status": "failed",
+      "evaluated": 2,
+      "findings": 1
+    },
+    {
+      "id": "COMP_MNT_001",
+      "title": "Unpinned image version",
+      "severity": "WARNING",
+      "category": "maintainability",
+      "target": "compose",
+      "status": "passed",
+      "evaluated": 2,
+      "findings": 0
+    },
+    {
+      "id": "COMP_SEC_001",
+      "title": "Privileged container",
+      "severity": "ERROR",
+      "category": "security",
+      "target": "compose",
+      "status": "failed",
+      "evaluated": 2,
+      "findings": 1
+    },
+    {
+      "id": "TF_SEC_001",
+      "title": "Public S3 bucket ACL",
+      "severity": "ERROR",
+      "category": "security",
+      "target": "terraform",
+      "status": "skipped",
+      "evaluated": 0,
+      "findings": 0
+    }
+  ],
+  "diagnostics": [
+    {
+      "file": "broken.yml",
+      "parser": "compose",
+      "message": "yaml: line 2: did not find expected key"
+    }
+  ],
+  "stats": {
+    "files_discovered": 3,
+    "files_parsed": 1,
+    "resources": 2,
+    "rules_evaluated": 4,
+    "suppressed": 0,
+    "duration_ms": 12
+  }
+}

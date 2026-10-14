@@ -204,7 +204,7 @@
       </div>
       <div class="nav-group" data-group="Guides">
         <div class="gh">Guides</div>
-        <a href="#scanning-output" data-keywords="scan output format console json sarif html report">Scanning &amp; output</a>
+        <a href="#scanning-output" data-keywords="scan output format console json sarif html report profile quick standard strict show-passed omit-skipped">Scanning &amp; output</a>
         <a href="#ci-integration" data-keywords="ci github actions pipeline sarif fail gate">CI integration</a>
         <a href="#configuration" data-keywords="config stackguard.yaml yaml settings exclude targets min-score">Configuration</a>
         <a href="#writing-rules" data-keywords="rules yaml policy query operators authoring custom">Writing custom rules</a>
@@ -334,11 +334,30 @@ Score 87/100
       </div>
       <pre><code><span class="pr">$</span> stackguard scan . --format sarif --output stackguard.sarif</code></pre>
 
-      <h2 id="out-quiet">Quiet and files</h2>
-      <p>Use <code>--output</code> to write to a file instead of stdout, and <code>--quiet</code> to print only findings and the score on the console.</p>
+      <h2 id="out-profiles">Scan profiles</h2>
+      <p>A profile sets how strict a scan is by filtering which rules run. Choose one with <code>--profile</code> (the default is <code>standard</code>).</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Profile</th><th>Runs</th></tr></thead>
+          <tbody>
+            <tr><td><code>quick</code></td><td>Errors only, and only security and reliability rules</td></tr>
+            <tr><td><code>standard</code></td><td>Warnings and above, all categories (the default)</td></tr>
+            <tr><td><code>strict</code></td><td>Everything from info up, all categories, and off-by-default rules too</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <pre><code><span class="pr">$</span> stackguard scan . --profile strict</code></pre>
+
+      <h2 id="out-console">Console and file options</h2>
+      <ul>
+        <li><code>--output</code> writes the report to a file instead of stdout.</li>
+        <li><code>--quiet</code> prints only findings and the score.</li>
+        <li><code>--show-passed</code> lists every passed rule instead of a summary.</li>
+        <li><code>--omit-skipped</code> drops skipped rules from json and sarif output (stats are unchanged).</li>
+      </ul>
 
       <h2 id="out-failon">Failing the scan</h2>
-      <p><code>--fail-on</code> sets the lowest severity that makes the scan exit with code 1. The default is <code>error</code>.</p>
+      <p><code>--fail-on</code> sets the lowest severity that makes the scan exit with code 1. The default is <code>error</code>; use <code>none</code> to never fail on severity.</p>
       <pre><code><span class="pr">$</span> stackguard scan . --fail-on warning</code></pre>
       <p>See <a class="inline" href="#exit-scoring">Exit codes &amp; scoring</a> for the full behavior.</p>
     </article>
@@ -400,17 +419,24 @@ Score 87/100
 <span class="c"># Only scan these targets.</span>
 <span class="k">targets</span>: [compose, kubernetes, terraform]
 
-<span class="c"># Severity that fails the scan, and the score gate.</span>
+<span class="c"># Extra directories of rule files, relative to this file.</span>
+<span class="k">rules_dirs</span>:
+  - ./policies
+
+<span class="c"># Scan profile: quick, standard or strict.</span>
+<span class="k">profile</span>: standard
+
+<span class="c"># Severity that fails the scan (or none), and the score gate.</span>
 <span class="k">fail_on</span>: ERROR
 <span class="k">min_score</span>: 80
 <span class="k">format</span>: console</code></pre>
-      <p>Unknown keys are an error, so a typo like <code>sevrity:</code> fails loudly instead of being silently ignored.</p>
+      <p>Unknown keys are an error, so a typo like <code>sevrity:</code> fails loudly instead of being silently ignored. <code>min_score</code> must be between 0 and 100, and <code>fail_on</code> also accepts <code>none</code> or <code>never</code> to disable the severity gate.</p>
 
       <h2 id="cfg-precedence">Precedence</h2>
-      <p>From lowest to highest: built-in defaults, the config file, environment variables (<code>STACKGUARD_&lt;KEY&gt;</code>), then command-line flags. <code>--disable</code> and <code>--exclude</code> are added to the configured lists rather than replacing them.</p>
+      <p>From lowest to highest: built-in defaults, the config file, environment variables, then command-line flags. Environment variables use the <code>STACKGUARD_</code> prefix, for example <code>STACKGUARD_MIN_SCORE</code>, <code>STACKGUARD_PROFILE</code> or <code>STACKGUARD_FAIL_ON</code>. <code>--disable</code> and <code>--exclude</code> are added to the configured lists rather than replacing them.</p>
 
       <h2 id="cfg-ignore">Ignoring files</h2>
-      <p>A <code>.stackguardignore</code> file holds one glob per line. These directories are always skipped: <code>.git</code>, <code>node_modules</code>, <code>vendor</code>, <code>.terraform</code>, <code>.venv</code>, <code>__pycache__</code> and <code>.stackguard</code>. Files larger than 5 MiB are skipped too.</p>
+      <p>A <code>.stackguardignore</code> file holds one glob per line. These directories are always skipped: <code>.git</code>, <code>.hg</code>, <code>.svn</code>, <code>node_modules</code>, <code>vendor</code>, <code>.terraform</code>, <code>.venv</code>, <code>venv</code>, <code>__pycache__</code>, <code>.idea</code> and <code>.stackguard</code>. Files larger than 5 MiB are skipped too.</p>
     </article>
 
     <!-- Writing custom rules -->
@@ -478,8 +504,9 @@ privileged: true</code></pre>
       <h2 id="cli-scan">scan</h2>
       <p>Scan files or directories for issues. Usage: <code>stackguard scan [path...]</code></p>
       <div class="tablewrap"><table><thead><tr><th>Flag</th><th>Description</th></tr></thead><tbody>
+        <tr><td><code>-p, --profile</code></td><td>scan profile: quick, standard or strict (default standard)</td></tr>
         <tr><td><code>-f, --format</code></td><td>console, json, sarif or html (default console)</td></tr>
-        <tr><td><code>--fail-on</code></td><td>severity that fails the scan: error, warning, info, none</td></tr>
+        <tr><td><code>--fail-on</code></td><td>severity that fails the scan: error, warning, info or none</td></tr>
         <tr><td><code>--min-score</code></td><td>exit 1 if the score falls below this value</td></tr>
         <tr><td><code>-o, --output</code></td><td>write the report to a file</td></tr>
         <tr><td><code>--target</code></td><td>only scan these targets</td></tr>
@@ -488,22 +515,24 @@ privileged: true</code></pre>
         <tr><td><code>--rules-dir</code></td><td>extra directory of rule files (repeatable)</td></tr>
         <tr><td><code>-j, --jobs</code></td><td>parallel parsers (default: number of CPUs)</td></tr>
         <tr><td><code>-q, --quiet</code></td><td>print only findings and the score</td></tr>
+        <tr><td><code>--show-passed</code></td><td>console: list every passed rule instead of a summary</td></tr>
+        <tr><td><code>--omit-skipped</code></td><td>json/sarif: drop rules with status skipped</td></tr>
       </tbody></table></div>
 
       <h2 id="cli-score">score</h2>
-      <p>Print the production-readiness score only. Usage: <code>stackguard score [path...]</code>. Flags: <code>-f, --format</code> (console or json) and <code>--min-score</code>.</p>
+      <p>Print the production-readiness score only. Usage: <code>stackguard score [path...]</code>. Flags: <code>-f, --format</code> (console or json), <code>--min-score</code>, <code>-p, --profile</code>, plus the shared filters <code>--target</code>, <code>--exclude</code>, <code>--rules-dir</code> and <code>-j, --jobs</code>.</p>
 
       <h2 id="cli-rules">rules</h2>
-      <p>List the available rules, or validate a rule directory. Usage: <code>stackguard rules</code>. Flags: <code>--target</code>, <code>--category</code>, <code>--severity</code>, <code>--format</code> and <code>--validate</code>.</p>
+      <p>List the available rules, or validate a rule directory. Usage: <code>stackguard rules</code>. Flags: <code>--target</code>, <code>--category</code>, <code>--severity</code>, <code>-f, --format</code> (table or json), <code>--rules-dir</code> and <code>--validate</code>.</p>
 
       <h2 id="cli-explain">explain</h2>
-      <p>Show the details, reason and remediation for one rule. Usage: <code>stackguard explain RULE_ID</code>. It also shows which file the rule loaded from.</p>
+      <p>Show the details, reason and remediation for one rule. Usage: <code>stackguard explain RULE_ID</code>. Flags: <code>-f, --format</code> (text or json) and <code>--rules-dir</code>. It also shows which file the rule loaded from.</p>
 
       <h2 id="cli-version">version</h2>
-      <p>Print the StackGuard version and build information. Usage: <code>stackguard version</code>.</p>
+      <p>Print the StackGuard version, commit, build date and platform. Usage: <code>stackguard version</code>. Flag: <code>-f, --format</code> (text or json).</p>
 
       <h2 id="cli-global">Global flags</h2>
-      <p>Available on every command: <code>--config</code>, <code>--log-level</code>, <code>--log-format</code>, <code>-v, --verbose</code> and <code>--no-color</code>.</p>
+      <p>Available on every command: <code>--config</code>, <code>--log-level</code>, <code>--log-format</code>, <code>-v, --verbose</code> and <code>--no-color</code>. The <code>NO_COLOR</code> environment variable is also honored.</p>
     </article>
 
     <!-- Rules reference -->
@@ -551,7 +580,8 @@ privileged: true</code></pre>
       <div class="tablewrap"><table><thead><tr><th>Code</th><th>Meaning</th></tr></thead><tbody>
         <tr><td><code>0</code></td><td>Success. No finding reached the fail-on severity and the score passed.</td></tr>
         <tr><td><code>1</code></td><td>A finding reached the fail-on severity, or the score fell below min-score.</td></tr>
-        <tr><td><code>2</code></td><td>Usage error (bad flags or arguments).</td></tr>
+        <tr><td><code>2</code></td><td>Usage error (bad flags, arguments, configuration or rules).</td></tr>
+        <tr><td><code>3</code></td><td>Internal error (an unexpected I/O or runtime failure).</td></tr>
       </tbody></table></div>
     </article>
 

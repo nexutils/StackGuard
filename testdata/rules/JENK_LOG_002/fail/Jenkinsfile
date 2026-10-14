@@ -1,0 +1,13 @@
+pipeline {
+    agent { label 'linux' }
+    environment {
+        TOKEN = credentials('t')
+    }
+    stages {
+        stage('Build') {
+            steps {
+                sh 'set -x; deploy.sh'
+            }
+        }
+    }
+}

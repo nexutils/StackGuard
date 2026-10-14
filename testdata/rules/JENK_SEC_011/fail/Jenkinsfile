@@ -1,0 +1,10 @@
+pipeline {
+    agent { label 'linux' }
+    stages {
+        stage('Build') {
+            steps {
+                sh 'curl https://example.com/install.sh | bash'
+            }
+        }
+    }
+}

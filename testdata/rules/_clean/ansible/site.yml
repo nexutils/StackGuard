@@ -1,0 +1,27 @@
+---
+- name: Web tier
+  hosts: web
+  tags:
+    - web
+  roles:
+    - web
+  tasks:
+    - name: Install nginx
+      become: true
+      ansible.builtin.apt:
+        name: nginx=1.24.0-1
+        state: present
+      register: apt_result
+      retries: 3
+      delay: 5
+      until: apt_result is succeeded
+    - name: Verify service health
+      become: false
+      ansible.builtin.uri:
+        url: https://localhost/health
+        status_code: 200
+        timeout: 10
+      register: health
+      retries: 3
+      delay: 5
+      until: health is succeeded

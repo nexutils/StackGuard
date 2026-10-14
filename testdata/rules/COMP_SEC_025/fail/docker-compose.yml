@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    tmpfs: ["/tmp:size=64m,noexec"]

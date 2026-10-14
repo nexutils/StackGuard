@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: key
+      community.crypto.openssl_privatekey:
+        path: /tmp/k
+        size: 1024

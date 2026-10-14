@@ -1,0 +1,160 @@
+[
+  {
+    "target": "nginx",
+    "type": "nginx",
+    "name": "nginx.conf",
+    "file": "nginx/nginx.conf",
+    "line": 8,
+    "properties": {
+      "context": {
+        "in_vcs": false
+      },
+      "events": {
+        "worker_connections": [
+          "1024"
+        ]
+      },
+      "http": {
+        "log_format": [
+          "main $remote_addr \"$request\" ${request_time}"
+        ],
+        "server_tokens": [
+          "off"
+        ]
+      },
+      "leaves": [
+        {
+          "effective": {
+            "add_header": [
+              "X-Frame-Options DENY",
+              "Strict-Transport-Security max-age=63072000 always"
+            ],
+            "headers": [
+              "X-Frame-Options DENY",
+              "Strict-Transport-Security max-age=63072000 always"
+            ],
+            "listen": "[::]:443 ssl",
+            "log_format": "main $remote_addr \"$request\" ${request_time}",
+            "proxy_pass": "http://app",
+            "server_name": "example.com www.example.com",
+            "server_tokens": "off"
+          },
+          "internal_only": false,
+          "path": "/",
+          "proxied": true,
+          "proxy_target_is_upstream": true,
+          "redirect_only": false,
+          "server_name": [
+            "example.com www.example.com"
+          ],
+          "tls": true
+        },
+        {
+          "effective": {
+            "add_header": [
+              "X-Frame-Options DENY",
+              "Strict-Transport-Security max-age=63072000 always"
+            ],
+            "deny": "all",
+            "headers": [
+              "X-Frame-Options DENY",
+              "Strict-Transport-Security max-age=63072000 always"
+            ],
+            "listen": "[::]:443 ssl",
+            "log_format": "main $remote_addr \"$request\" ${request_time}",
+            "server_name": "example.com www.example.com",
+            "server_tokens": "off"
+          },
+          "internal_only": false,
+          "modifier": "~",
+          "path": "\\.php$",
+          "proxied": false,
+          "proxy_target_is_upstream": false,
+          "redirect_only": false,
+          "server_name": [
+            "example.com www.example.com"
+          ],
+          "tls": true
+        }
+      ],
+      "main": {
+        "user": [
+          "nginx"
+        ],
+        "worker_processes": [
+          "auto"
+        ]
+      },
+      "servers": [
+        {
+          "add_header": [
+            "X-Frame-Options DENY",
+            "Strict-Transport-Security max-age=63072000 always"
+          ],
+          "effective": {
+            "add_header": [
+              "X-Frame-Options DENY",
+              "Strict-Transport-Security max-age=63072000 always"
+            ],
+            "headers": [
+              "X-Frame-Options DENY",
+              "Strict-Transport-Security max-age=63072000 always"
+            ],
+            "listen": "[::]:443 ssl",
+            "log_format": "main $remote_addr \"$request\" ${request_time}",
+            "server_name": "example.com www.example.com",
+            "server_tokens": "off"
+          },
+          "internal_only": false,
+          "listen": [
+            "443 ssl",
+            "[::]:443 ssl"
+          ],
+          "locations": [
+            {
+              "path": "/",
+              "proxy_pass": [
+                "http://app"
+              ]
+            },
+            {
+              "deny": [
+                "all"
+              ],
+              "modifier": "~",
+              "path": "\\.php$"
+            }
+          ],
+          "redirect_only": false,
+          "server_name": [
+            "example.com www.example.com"
+          ],
+          "tls": true
+        }
+      ],
+      "upstreams": [
+        {
+          "health_check": false,
+          "name": "app",
+          "server": [
+            "127.0.0.1:8080"
+          ]
+        }
+      ]
+    },
+    "locations": {
+      "leaves.0": {
+        "line": 23
+      },
+      "leaves.1": {
+        "line": 27
+      },
+      "servers.0": {
+        "line": 16
+      },
+      "upstreams.0": {
+        "line": 12
+      }
+    }
+  }
+]

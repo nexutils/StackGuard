@@ -1,0 +1,7 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: react
+      ansible.builtin.command: echo go
+      when: prev.changed

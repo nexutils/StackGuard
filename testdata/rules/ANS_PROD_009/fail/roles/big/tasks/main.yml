@@ -1,0 +1,101 @@
+---
+- name: task 1
+  ansible.builtin.ping:
+- name: task 2
+  ansible.builtin.ping:
+- name: task 3
+  ansible.builtin.ping:
+- name: task 4
+  ansible.builtin.ping:
+- name: task 5
+  ansible.builtin.ping:
+- name: task 6
+  ansible.builtin.ping:
+- name: task 7
+  ansible.builtin.ping:
+- name: task 8
+  ansible.builtin.ping:
+- name: task 9
+  ansible.builtin.ping:
+- name: task 10
+  ansible.builtin.ping:
+- name: task 11
+  ansible.builtin.ping:
+- name: task 12
+  ansible.builtin.ping:
+- name: task 13
+  ansible.builtin.ping:
+- name: task 14
+  ansible.builtin.ping:
+- name: task 15
+  ansible.builtin.ping:
+- name: task 16
+  ansible.builtin.ping:
+- name: task 17
+  ansible.builtin.ping:
+- name: task 18
+  ansible.builtin.ping:
+- name: task 19
+  ansible.builtin.ping:
+- name: task 20
+  ansible.builtin.ping:
+- name: task 21
+  ansible.builtin.ping:
+- name: task 22
+  ansible.builtin.ping:
+- name: task 23
+  ansible.builtin.ping:
+- name: task 24
+  ansible.builtin.ping:
+- name: task 25
+  ansible.builtin.ping:
+- name: task 26
+  ansible.builtin.ping:
+- name: task 27
+  ansible.builtin.ping:
+- name: task 28
+  ansible.builtin.ping:
+- name: task 29
+  ansible.builtin.ping:
+- name: task 30
+  ansible.builtin.ping:
+- name: task 31
+  ansible.builtin.ping:
+- name: task 32
+  ansible.builtin.ping:
+- name: task 33
+  ansible.builtin.ping:
+- name: task 34
+  ansible.builtin.ping:
+- name: task 35
+  ansible.builtin.ping:
+- name: task 36
+  ansible.builtin.ping:
+- name: task 37
+  ansible.builtin.ping:
+- name: task 38
+  ansible.builtin.ping:
+- name: task 39
+  ansible.builtin.ping:
+- name: task 40
+  ansible.builtin.ping:
+- name: task 41
+  ansible.builtin.ping:
+- name: task 42
+  ansible.builtin.ping:
+- name: task 43
+  ansible.builtin.ping:
+- name: task 44
+  ansible.builtin.ping:
+- name: task 45
+  ansible.builtin.ping:
+- name: task 46
+  ansible.builtin.ping:
+- name: task 47
+  ansible.builtin.ping:
+- name: task 48
+  ansible.builtin.ping:
+- name: task 49
+  ansible.builtin.ping:
+- name: task 50
+  ansible.builtin.ping:

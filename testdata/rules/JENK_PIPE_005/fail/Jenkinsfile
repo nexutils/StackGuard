@@ -1,0 +1,11 @@
+pipeline {
+    agent { label 'linux' }
+    stages {
+        stage('Checks') {
+            parallel {
+                stage('a') { steps { sh 'a' } }
+                stage('b') { steps { sh 'b' } }
+            }
+        }
+    }
+}

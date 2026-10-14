@@ -1,0 +1,15 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: outer
+      block:
+        - name: inner
+          ansible.builtin.command: echo "{{ item }}"
+          changed_when: false
+          loop:
+            - 1
+            - 2
+      loop:
+        - a
+        - b

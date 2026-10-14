@@ -1,0 +1,7 @@
+services:
+  app:
+    build:
+      context: .
+      args:
+        NPM_TOKEN: abc
+    image: acme/app:1.0

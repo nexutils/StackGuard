@@ -1,0 +1,9 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: web
+  namespace: app
+spec:
+  scaleTargetRef: {kind: Deployment, name: web}
+  minReplicas: 1
+  maxReplicas: 5

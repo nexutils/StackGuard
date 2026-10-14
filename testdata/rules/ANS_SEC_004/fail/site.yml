@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  vars:
+    db_secret: plaintextvalue
+  tasks:
+    - name: ping
+      ansible.builtin.ping:

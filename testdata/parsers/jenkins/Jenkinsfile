@@ -1,0 +1,32 @@
+// A comment with a fake stage('Commented') { }
+pipeline {
+    agent {
+        label 'linux'
+    }
+    options {
+        timeout(time: 1, unit: 'HOURS')
+        disableConcurrentBuilds()
+    }
+    environment {
+        TOKEN = credentials('api-token')
+    }
+    stages {
+        stage('Build') {
+            steps {
+                sh 'echo "{ brace in string"'
+                sh """
+                    make build
+                """
+            }
+        }
+        stage('Deploy') {
+            when { branch 'main' }
+            steps {
+                sh(script: './deploy.sh', returnStatus: true)
+            }
+        }
+    }
+    post {
+        failure { echo 'failed' }
+    }
+}

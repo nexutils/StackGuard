@@ -1,0 +1,1692 @@
+# kubernetes rules for StackGuard.
+#
+# These run against the single "kubernetes" resource the parser builds (see
+# internal/parser/kubernetes): resources[*], workloads[*], containers[*] (with
+# the effective securityContext in sc), services[*], ingresses[*], secrets[*],
+# configmaps[*], hpas[*], pdbs[*], namespaces[*], rbac_*[*], strings[*].
+# Cross-object facts (has_pdb, has_hpa, network_policy_selected, targets_pods,
+# namespace quotas) are computed from the sibling manifests in the same
+# directory. One YAML document per rule; run `make test`.
+#
+# category values are mapped to StackGuard's set: resources→performance,
+# network→security, image→maintainability, production→operational.
+id: K8S_SEC_001
+title: Container runs as root
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The container is explicitly configured to run as UID 0
+description: |
+  A root process inside the container is root on the host if it escapes the
+  container through a kernel or runtime vulnerability.
+remediation: |
+  Set securityContext.runAsUser to a non-zero UID (and build the image with a
+  non-root USER).
+query:
+  path: containers[*]
+  where:
+    path: sc.runAsUser
+    equals: 0
+---
+id: K8S_SEC_002
+title: runAsNonRoot not configured
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: runAsNonRoot is not set to true
+description: |
+  Without runAsNonRoot the kubelet starts the container as whatever user the
+  image defines, which is root for most images.
+remediation: |
+  Set securityContext.runAsNonRoot: true at pod or container level.
+query:
+  path: containers[*]
+  where:
+    any:
+      - path: sc.runAsNonRoot
+        exists: false
+      - path: sc.runAsNonRoot
+        equals: false
+---
+id: K8S_SEC_003
+title: readOnlyRootFilesystem not enabled
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The container's root filesystem is writable
+description: |
+  A writable root filesystem lets an attacker drop binaries, modify the
+  application or persist changes inside the container.
+remediation: |
+  Set securityContext.readOnlyRootFilesystem: true and mount emptyDir volumes
+  for paths that must be writable (/tmp, caches).
+query:
+  path: containers[*]
+  where:
+    any:
+      - path: sc.readOnlyRootFilesystem
+        exists: false
+      - path: sc.readOnlyRootFilesystem
+        equals: false
+---
+id: K8S_SEC_004
+title: allowPrivilegeEscalation not disabled
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: allowPrivilegeEscalation is not set to false
+description: |
+  Processes can gain more privileges than their parent through setuid binaries
+  or file capabilities (no_new_privs is not set).
+remediation: |
+  Set securityContext.allowPrivilegeEscalation: false.
+query:
+  path: containers[*]
+  where:
+    any:
+      - path: sc.allowPrivilegeEscalation
+        exists: false
+      - path: sc.allowPrivilegeEscalation
+        equals: true
+---
+id: K8S_SEC_005
+title: Privileged container enabled
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The container runs in privileged mode
+description: |
+  A privileged container has all capabilities and access to host devices; it is
+  effectively root on the node.
+remediation: |
+  Remove privileged: true and grant only the specific capabilities required.
+query:
+  path: containers[*]
+  where:
+    path: sc.privileged
+    equals: true
+---
+id: K8S_SEC_006
+title: Capabilities are not dropped
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The container does not drop ALL Linux capabilities
+description: |
+  Container runtimes grant a default capability set (including NET_RAW, CHOWN,
+  SETUID) that most applications never need.
+remediation: |
+  Set securityContext.capabilities.drop: ["ALL"] and add back only what is
+  required (e.g. NET_BIND_SERVICE).
+query:
+  path: containers[*]
+  where:
+    not: { path: 'sc.capabilities.drop', contains_any: [ALL, all] }
+---
+id: K8S_SEC_007
+title: Seccomp profile not configured
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: No seccomp profile is applied, or it is Unconfined
+description: |
+  Without seccomp, the container can call every syscall, including rarely used
+  ones that are common kernel exploit vectors.
+remediation: |
+  Set securityContext.seccompProfile.type: RuntimeDefault at pod level.
+query:
+  path: containers[*]
+  where:
+    not: { path: 'sc.seccompProfile.type', in: [RuntimeDefault, Localhost] }
+---
+id: K8S_SEC_008
+title: AppArmor profile not configured
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: No AppArmor profile is applied, or it is Unconfined
+description: |
+  AppArmor restricts file, network and capability access per program; an
+  unconfined container loses that layer on AppArmor-enabled nodes.
+remediation: |
+  Set securityContext.appArmorProfile.type: RuntimeDefault (Kubernetes 1.30+),
+  or the container.apparmor.security.beta.kubernetes.io annotation on older
+  clusters.
+query:
+  path: containers[*]
+  where:
+    not: { path: 'sc.appArmorProfile.type', in: [RuntimeDefault, Localhost] }
+---
+id: K8S_SEC_009
+title: Host PID namespace enabled
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The pod shares the node's process namespace
+description: |
+  With hostPID the container can see, signal and inspect every process on the
+  node, including their environment variables.
+remediation: |
+  Remove hostPID: true.
+query:
+  path: workloads[*]
+  where:
+    path: pod.hostPID
+    equals: true
+---
+id: K8S_SEC_010
+title: Host network enabled
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The pod uses the node's network namespace
+description: |
+  hostNetwork bypasses NetworkPolicies, exposes node-local services such as the
+  kubelet and lets the pod sniff node traffic.
+remediation: |
+  Remove hostNetwork: true and expose the pod through a Service.
+query:
+  path: workloads[*]
+  where:
+    path: pod.hostNetwork
+    equals: true
+---
+id: K8S_SEC_011
+title: Host IPC namespace enabled
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The pod shares the node's IPC namespace
+description: |
+  hostIPC gives access to shared memory and message queues of every process on
+  the node.
+remediation: |
+  Remove hostIPC: true.
+query:
+  path: workloads[*]
+  where:
+    path: pod.hostIPC
+    equals: true
+---
+id: K8S_SEC_012
+title: HostPath volume mounted
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The pod mounts a directory from the node filesystem
+description: |
+  hostPath volumes expose node files (container runtime socket, kubelet
+  credentials, /etc) and are a common container escape path.
+remediation: |
+  Use PersistentVolumes, emptyDir, ConfigMaps or CSI drivers instead. If a
+  hostPath is unavoidable, make it readOnly and as narrow as possible.
+query:
+  path: workloads[*]
+  where:
+    path: pod.volumes[*].hostPath
+    exists: true
+---
+id: K8S_SEC_013
+title: Secret hardcoded in manifest
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: A secret value is stored in plaintext in the manifests
+description: |
+  Secret objects are only base64-encoded, and env values and ConfigMaps are
+  plaintext; anyone with repository access can read them.
+remediation: |
+  Use Sealed Secrets, SOPS, External Secrets Operator or a CSI secret store, and
+  reference secrets with valueFrom.secretKeyRef.
+query:
+  any:
+    - path: containers[*]
+      where:
+        path: env[*]
+        where:
+          all:
+            - path: name
+              matches: '(?i)(password|passwd|pwd|secret|token|api_?key|private_?key|access_?key|credentials?)'
+            - path: value
+              matches: '\S'
+            - not: { path: 'value', matches: '^\$\(' }
+    - path: secrets[*]
+      where:
+        any:
+          - path: data
+            exists: true
+          - path: stringData
+            exists: true
+    - path: configmaps[*]
+      where:
+        path: 'data_keys[*]'
+        matches: '(?i)(password|passwd|secret|token|api_?key|private_?key)'
+    - path: strings[*]
+      matches: '(-----BEGIN [A-Z ]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|gh[pousr]_[A-Za-z0-9]{36}|xox[abprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{20,}|(AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35})'
+---
+id: K8S_SEC_014
+title: ServiceAccount token mounted unnecessarily
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The Kubernetes API token is mounted into the pod
+description: |
+  Most applications never call the Kubernetes API; a mounted token lets an
+  attacker who compromises the pod act with the ServiceAccount's permissions.
+remediation: |
+  Set automountServiceAccountToken: false on the pod or ServiceAccount, and
+  enable it only for workloads that talk to the API.
+query:
+  path: workloads[*]
+  where:
+    path: automount_token
+    equals: true
+---
+id: K8S_SEC_015
+title: RBAC permissions may be excessive
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: A role grants wildcard, secret, escalation or exec permissions
+description: |
+  Wildcards, read access to Secrets, escalate/bind/impersonate and pods/exec
+  allow a compromised identity to take over the namespace or the cluster.
+remediation: |
+  List explicit verbs and resources, avoid Secret read access, and bind
+  cluster-admin only to break-glass identities.
+query:
+  any:
+    - path: rbac_roles[*]
+      where:
+        path: rules[*]
+        where:
+          any:
+            - path: verbs
+              contains: "*"
+            - path: resources
+              contains: "*"
+            - path: verbs
+              contains_any: [escalate, bind, impersonate]
+            - all:
+                - path: resources
+                  contains: secrets
+                - path: verbs
+                  contains_any: [get, list, watch]
+            - all:
+                - path: resources
+                  contains_any: [pods/exec, pods/attach, nodes/proxy]
+                - path: verbs
+                  contains_any: [create, get]
+    - path: rbac_bindings[*]
+      where:
+        all:
+          - path: roleRef.name
+            equals: cluster-admin
+          - not: { path: 'subjects[*].name', matches: '^system:' }
+---
+id: K8S_SEC_016
+title: Dangerous capability added
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The container adds a capability outside the Pod Security baseline set
+description: |
+  Capabilities such as SYS_ADMIN, NET_ADMIN, SYS_PTRACE or SYS_MODULE give near
+  root-level control over the node and are blocked by the PSS baseline profile.
+remediation: |
+  Remove the capability. If the workload truly needs it, run it in a dedicated,
+  tightly controlled namespace.
+query:
+  path: containers[*]
+  where:
+    path: 'sc.capabilities.add[*]'
+    not_in: [AUDIT_WRITE, CHOWN, DAC_OVERRIDE, FOWNER, FSETID, KILL, MKNOD, NET_BIND_SERVICE, SETFCAP, SETGID, SETPCAP, SETUID, SYS_CHROOT]
+---
+id: K8S_SEC_017
+title: Capability added beyond restricted profile
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The container adds a capability other than NET_BIND_SERVICE
+description: |
+  The PSS restricted profile allows adding only NET_BIND_SERVICE; every other
+  added capability widens what a compromised process can do.
+remediation: |
+  Remove added capabilities, or document and isolate the workload if one is
+  required.
+query:
+  path: containers[*]
+  where:
+    path: 'sc.capabilities.add[*]'
+    not_in: [NET_BIND_SERVICE]
+---
+id: K8S_SEC_018
+title: Unmasked /proc mount
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: procMount is set to Unmasked
+description: |
+  Unmasked exposes kernel interfaces under /proc that the runtime normally
+  hides, enabling information leaks and container escapes.
+remediation: |
+  Remove procMount or set it to Default.
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: sc.procMount
+        equals: Unmasked
+      - not: { path: 'workload_pod.hostUsers', equals: false }
+---
+id: K8S_SEC_019
+title: Unsafe sysctl configured
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The pod sets a sysctl outside the safe set
+description: |
+  Non-namespaced or unsafe sysctls can disable kernel security mechanisms or
+  affect every pod on the node (PSS baseline).
+remediation: |
+  Use only the safe sysctls, or tune the node itself.
+query:
+  path: workloads[*]
+  where:
+    path: 'pod.securityContext.sysctls[*].name'
+    not_in: [kernel.shm_rmid_forced, net.ipv4.ip_local_port_range, net.ipv4.ip_unprivileged_port_start, net.ipv4.tcp_syncookies, net.ipv4.ping_group_range, net.ipv4.ip_local_reserved_ports, net.ipv4.tcp_keepalive_time, net.ipv4.tcp_fin_timeout, net.ipv4.tcp_keepalive_intvl, net.ipv4.tcp_keepalive_probes, net.ipv4.tcp_rmem, net.ipv4.tcp_wmem]
+---
+id: K8S_SEC_020
+title: Custom SELinux options set
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: seLinuxOptions sets a user, role or non-container type
+description: |
+  Custom SELinux users, roles or types can lift the confinement that SELinux
+  applies to containers (PSS baseline).
+remediation: |
+  Remove seLinuxOptions, or use only container_t, container_init_t,
+  container_kvm_t or container_engine_t types.
+query:
+  path: containers[*]
+  where:
+    any:
+      - path: sc.seLinuxOptions.user
+        exists: true
+      - path: sc.seLinuxOptions.role
+        exists: true
+      - all:
+          - path: sc.seLinuxOptions.type
+            exists: true
+          - not: { path: 'sc.seLinuxOptions.type', in: ["", container_t, container_init_t, container_kvm_t, container_engine_t] }
+---
+id: K8S_SEC_021
+title: Restricted volume type used
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The pod uses a volume type outside the PSS restricted allow-list
+description: |
+  Inline volume types such as nfs, iscsi, cephfs, flexVolume or the deprecated
+  gitRepo bypass PersistentVolume controls and carry known vulnerabilities.
+remediation: |
+  Use persistentVolumeClaim, configMap, secret, emptyDir, projected,
+  downwardAPI, csi, ephemeral or image volumes.
+query:
+  path: workloads[*]
+  where:
+    path: 'pod.volumes[*]'
+    where:
+      all:
+        - not: { path: 'configMap', exists: true }
+        - not: { path: 'csi', exists: true }
+        - not: { path: 'downwardAPI', exists: true }
+        - not: { path: 'emptyDir', exists: true }
+        - not: { path: 'ephemeral', exists: true }
+        - not: { path: 'image', exists: true }
+        - not: { path: 'persistentVolumeClaim', exists: true }
+        - not: { path: 'projected', exists: true }
+        - not: { path: 'secret', exists: true }
+---
+id: K8S_SEC_022
+title: Windows HostProcess container
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: The container runs as a Windows HostProcess container
+description: |
+  HostProcess containers run directly on the Windows host with full access,
+  equivalent to privileged Linux containers.
+remediation: |
+  Remove windowsOptions.hostProcess unless this is a vetted node agent.
+query:
+  path: containers[*]
+  where:
+    path: sc.windowsOptions.hostProcess
+    equals: true
+---
+id: K8S_SEC_023
+title: Probe or lifecycle hook targets another host
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: A probe or lifecycle hook sets the host field
+description: |
+  The kubelet performs probes and HTTP hooks from the node; a custom host turns
+  it into a request proxy to arbitrary addresses (blocked by PSS baseline).
+remediation: |
+  Remove the host field so probes target the pod IP.
+query:
+  path: containers[*]
+  where:
+    any:
+      - path: readinessProbe.httpGet.host
+        exists: true
+      - path: readinessProbe.tcpSocket.host
+        exists: true
+      - path: livenessProbe.httpGet.host
+        exists: true
+      - path: livenessProbe.tcpSocket.host
+        exists: true
+      - path: startupProbe.httpGet.host
+        exists: true
+      - path: startupProbe.tcpSocket.host
+        exists: true
+      - path: lifecycle.postStart.httpGet.host
+        exists: true
+      - path: lifecycle.postStart.tcpSocket.host
+        exists: true
+      - path: lifecycle.preStop.httpGet.host
+        exists: true
+      - path: lifecycle.preStop.tcpSocket.host
+        exists: true
+---
+id: K8S_SEC_024
+title: Root group used
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The pod or container runs with GID 0
+description: |
+  Group 0 owns many sensitive files in images and on the host; a non-root UID
+  with GID 0 can still read or write them.
+remediation: |
+  Set runAsGroup and fsGroup to a non-zero GID and remove 0 from
+  supplementalGroups.
+query:
+  any:
+    - path: containers[*]
+      where:
+        path: sc.runAsGroup
+        equals: 0
+    - path: workloads[*]
+      where:
+        any:
+          - path: pod.securityContext.fsGroup
+            equals: 0
+          - path: pod.securityContext.supplementalGroups
+            contains: 0
+---
+id: K8S_SEC_025
+title: Secrets exposed as environment variables
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: A Secret is injected through env or envFrom
+description: |
+  Environment variables are inherited by child processes, show up in crash dumps
+  and debug endpoints, and are often logged; mounted files are safer and can be
+  rotated without a restart.
+remediation: |
+  Mount the Secret as a volume and read it from a file.
+query:
+  path: containers[*]
+  where:
+    any:
+      - path: 'env[*].valueFrom.secretKeyRef'
+        exists: true
+      - path: 'envFrom[*].secretRef'
+        exists: true
+---
+id: K8S_SEC_026
+title: Default ServiceAccount used
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The pod runs with the namespace's default ServiceAccount
+description: |
+  Permissions granted to "default" apply to every pod in the namespace, and
+  workloads cannot be told apart in RBAC and audit logs.
+remediation: |
+  Create a dedicated ServiceAccount per workload and set serviceAccountName.
+query:
+  path: workloads[*]
+  where:
+    any:
+      - path: pod.serviceAccountName
+        exists: false
+      - path: pod.serviceAccountName
+        equals: default
+---
+id: K8S_SEC_027
+title: Resource deployed to default namespace
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: A namespaced object is placed in the default namespace
+description: |
+  The default namespace usually has no Pod Security labels, quotas or network
+  policies, and mixes unrelated workloads.
+remediation: |
+  Deploy into a dedicated namespace per application or team.
+query:
+  path: resources[*]
+  where:
+    all:
+      - path: metadata.namespace
+        equals: default
+      - path: kind
+        not_in: [Namespace, Node, PersistentVolume, StorageClass, ClusterRole, ClusterRoleBinding, CustomResourceDefinition, PriorityClass, IngressClass, RuntimeClass, MutatingWebhookConfiguration, ValidatingWebhookConfiguration, APIService]
+---
+id: K8S_SEC_028
+title: Namespace has no Pod Security enforcement
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The Namespace does not enforce a Pod Security Standard
+description: |
+  Without the pod-security.kubernetes.io/enforce label, Pod Security Admission
+  does not block privileged pods in the namespace.
+remediation: |
+  Label the Namespace with pod-security.kubernetes.io/enforce: restricted (or
+  baseline where restricted is not yet possible).
+query:
+  path: namespaces[*]
+  where:
+    all:
+      - path: declared
+        equals: true
+      - any:
+          - path: 'labels["pod-security.kubernetes.io/enforce"]'
+            exists: false
+          - path: 'labels["pod-security.kubernetes.io/enforce"]'
+            equals: privileged
+---
+id: K8S_SEC_029
+title: Process namespace shared between containers
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: shareProcessNamespace is enabled
+description: |
+  All containers in the pod can see and signal each other's processes and read
+  their /proc/<pid>/environ, exposing sidecar secrets to the application.
+remediation: |
+  Remove shareProcessNamespace unless a debugging or sidecar pattern needs it.
+query:
+  path: workloads[*]
+  where:
+    path: pod.shareProcessNamespace
+    equals: true
+---
+id: K8S_RES_001
+title: CPU requests not configured
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: The container has no CPU request
+description: |
+  Without a CPU request the scheduler cannot place the pod correctly and the pod
+  gets the lowest CPU share under contention (BestEffort QoS).
+remediation: |
+  Set resources.requests.cpu based on observed usage.
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: resources.requests.cpu
+        exists: false
+---
+id: K8S_RES_002
+title: CPU limits not configured
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: The container has no CPU limit
+description: |
+  A container without a CPU limit can consume all spare CPU on the node. Note
+  that CPU limits also cause throttling; some teams deliberately omit them and
+  rely on requests plus namespace LimitRanges.
+remediation: |
+  Set resources.limits.cpu, or disable this rule if your policy is
+  requests-only CPU management.
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: resources.limits.cpu
+        exists: false
+---
+id: K8S_RES_003
+title: Memory requests not configured
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: The container has no memory request
+description: |
+  Pods without memory requests are scheduled onto nodes that cannot hold them
+  and are the first to be evicted under memory pressure.
+remediation: |
+  Set resources.requests.memory based on observed usage.
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: resources.requests.memory
+        exists: false
+---
+id: K8S_RES_004
+title: Memory limits not configured
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: The container has no memory limit
+description: |
+  A memory leak in one container can exhaust node memory and get unrelated pods
+  OOM-killed.
+remediation: |
+  Set resources.limits.memory (commonly equal to the request).
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: resources.limits.memory
+        exists: false
+---
+id: K8S_RES_005
+title: Ephemeral storage limits not configured
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: The container has no ephemeral-storage limit
+description: |
+  Logs, emptyDir and writable layers count against node disk; an unbounded
+  container can fill the disk and trigger node-wide evictions.
+remediation: |
+  Set resources.limits["ephemeral-storage"] (and sizeLimit on emptyDir volumes).
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: 'resources.limits["ephemeral-storage"]'
+        exists: false
+---
+id: K8S_RES_006
+title: emptyDir without size limit
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: An emptyDir volume has no sizeLimit
+description: |
+  emptyDir uses node disk (or memory for medium: Memory); without sizeLimit a
+  single pod can fill it and trigger evictions of other pods.
+remediation: |
+  Set emptyDir.sizeLimit on every emptyDir volume.
+query:
+  path: workloads[*]
+  where:
+    path: 'pod.volumes[*]'
+    where:
+      all:
+        - path: emptyDir
+          exists: true
+        - path: emptyDir.sizeLimit
+          exists: false
+---
+id: K8S_RES_007
+title: Namespace has no ResourceQuota
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: No ResourceQuota is defined for the namespace
+description: |
+  Without a quota, one team or a runaway autoscaler can consume all cluster
+  capacity.
+remediation: |
+  Add a ResourceQuota for CPU, memory, storage and object counts.
+query:
+  path: namespaces[*]
+  where:
+    all:
+      - path: name
+        not_in: [default, kube-system, kube-public, kube-node-lease]
+      - path: has_resource_quota
+        equals: false
+---
+id: K8S_RES_008
+title: Namespace has no LimitRange
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: No LimitRange provides default requests and limits
+description: |
+  Containers that omit resources get no defaults and run as BestEffort.
+remediation: |
+  Add a LimitRange with default and defaultRequest values for containers.
+query:
+  path: namespaces[*]
+  where:
+    all:
+      - path: name
+        not_in: [default, kube-system, kube-public, kube-node-lease]
+      - path: has_limit_range
+        equals: false
+---
+id: K8S_RES_009
+title: Priority class not set
+severity: WARNING
+category: performance
+target: kubernetes
+resource: kubernetes
+message: The workload has no priorityClassName
+description: |
+  Without a priority class, critical services are preempted or evicted in the
+  same order as batch jobs when the cluster is under pressure.
+remediation: |
+  Define PriorityClasses and set priorityClassName on every workload.
+query:
+  path: workloads[*]
+  where:
+    path: pod.priorityClassName
+    exists: false
+---
+id: K8S_REL_001
+title: Readiness probe missing
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The container has no readiness probe
+description: |
+  Without a readiness probe, traffic is sent to pods as soon as they start and
+  to pods that are temporarily unable to serve.
+remediation: |
+  Add a readinessProbe (HTTP, gRPC or TCP) that reflects whether the container
+  can serve requests.
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: type
+        equals: container
+      - path: workload.kind
+        not_in: [Job, CronJob]
+      - path: readinessProbe
+        exists: false
+---
+id: K8S_REL_002
+title: Liveness probe missing
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The container has no liveness probe
+description: |
+  A deadlocked or hung process keeps running and never gets restarted.
+remediation: |
+  Add a livenessProbe that checks the process itself, not its dependencies, so a
+  database outage does not restart every pod.
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: type
+        equals: container
+      - path: workload.kind
+        not_in: [Job, CronJob]
+      - path: livenessProbe
+        exists: false
+---
+id: K8S_REL_003
+title: Startup probe missing
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The container has a liveness probe but no startup probe
+description: |
+  Slow-starting applications get killed by the liveness probe before they finish
+  starting, causing restart loops.
+remediation: |
+  Add a startupProbe with a generous failureThreshold x periodSeconds.
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: type
+        equals: container
+      - path: workload.kind
+        not_in: [Job, CronJob]
+      - path: livenessProbe
+        exists: true
+      - path: startupProbe
+        exists: false
+---
+id: K8S_REL_004
+title: Pod disruption budget missing
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: A replicated workload has no PodDisruptionBudget
+description: |
+  Node drains during upgrades or autoscaling can evict all replicas at once.
+remediation: |
+  Add a PodDisruptionBudget with minAvailable or maxUnavailable that selects the
+  workload's pods.
+query:
+  path: workloads[*]
+  where:
+    all:
+      - path: kind
+        in: [Deployment, StatefulSet]
+      - path: has_pdb
+        equals: false
+      - any:
+          - path: spec.replicas
+            gte: 2
+          - path: has_hpa
+            equals: true
+---
+id: K8S_REL_005
+title: High availability configuration missing
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The workload runs a single replica or its replicas are not spread
+description: |
+  One replica, or several replicas that can all land on the same node or zone,
+  means a single node or zone failure takes the service down.
+remediation: |
+  Run at least 2 replicas (or an HPA with minReplicas >= 2) and add
+  topologySpreadConstraints or podAntiAffinity.
+query:
+  path: workloads[*]
+  where:
+    all:
+      - path: kind
+        in: [Deployment, StatefulSet]
+      - any:
+          - all:
+              - any:
+                  - path: spec.replicas
+                    exists: false
+                  - path: spec.replicas
+                    lt: 2
+              - path: has_hpa
+                equals: false
+          - all:
+              - path: pod.topologySpreadConstraints
+                exists: false
+              - path: pod.affinity.podAntiAffinity
+                exists: false
+---
+id: K8S_REL_006
+title: Replica count not configured
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: replicas is not set and no autoscaler manages the workload
+description: |
+  Without spec.replicas the workload silently runs 1 replica.
+remediation: |
+  Set spec.replicas explicitly, or attach a HorizontalPodAutoscaler.
+query:
+  path: workloads[*]
+  where:
+    all:
+      - path: kind
+        in: [Deployment, StatefulSet, ReplicaSet]
+      - path: spec.replicas
+        exists: false
+      - path: has_hpa
+        equals: false
+---
+id: K8S_REL_007
+title: Rolling update strategy missing
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The workload is updated with Recreate / OnDelete or an unset strategy
+description: |
+  Recreate stops every pod before starting new ones (downtime on each deploy);
+  OnDelete never rolls out until pods are deleted by hand.
+remediation: |
+  Use RollingUpdate with explicit maxUnavailable / maxSurge, or
+  updateStrategy.type: RollingUpdate.
+query:
+  path: workloads[*]
+  where:
+    any:
+      - all:
+          - path: kind
+            equals: Deployment
+          - any:
+              - path: spec.strategy.type
+                equals: Recreate
+              - path: spec.strategy
+                exists: false
+      - all:
+          - path: kind
+            in: [StatefulSet, DaemonSet]
+          - path: spec.updateStrategy.type
+            equals: OnDelete
+---
+id: K8S_REL_008
+title: Graceful termination settings missing
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The pod has no shutdown grace configuration
+description: |
+  Pods are removed from Service endpoints and sent SIGTERM at about the same
+  time; without a preStop delay or grace period, in-flight requests fail on
+  every deploy and scale-down.
+remediation: |
+  Set terminationGracePeriodSeconds to match the longest request, and add a
+  preStop hook so endpoints update before shutdown.
+query:
+  path: workloads[*]
+  where:
+    all:
+      - path: kind
+        not_in: [Job, CronJob]
+      - any:
+          - path: pod.terminationGracePeriodSeconds
+            equals: 0
+          - all:
+              - path: pod.terminationGracePeriodSeconds
+                exists: false
+              - not: { path: 'pod.containers[*].lifecycle.preStop', exists: true }
+---
+id: K8S_REL_009
+title: Liveness and readiness probes are identical
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The liveness probe is the same as the readiness probe
+description: |
+  When both probes are identical, a temporarily overloaded pod is restarted
+  instead of just being taken out of rotation, which can cascade into an outage.
+remediation: |
+  Make the liveness probe check only that the process is alive, with a higher
+  failureThreshold than readiness.
+query:
+  path: containers[*]
+  where:
+    all:
+      - path: livenessProbe
+        exists: true
+      - path: livenessProbe
+        equals_ref: readinessProbe
+---
+id: K8S_REL_010
+title: Replicas set on autoscaled workload
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The workload sets spec.replicas while an HPA manages it
+description: |
+  Every deploy resets the replica count to spec.replicas, undoing the HPA's
+  scaling until it reacts again.
+remediation: |
+  Remove spec.replicas from workloads targeted by an HPA.
+query:
+  path: workloads[*]
+  where:
+    all:
+      - path: has_hpa
+        equals: true
+      - path: spec.replicas
+        exists: true
+---
+id: K8S_REL_011
+title: Autoscaler allows a single replica
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The HPA has minReplicas below 2 or minReplicas equal to maxReplicas
+description: |
+  With minReplicas 1 the service has no redundancy at low load; with min = max
+  the HPA cannot scale at all.
+remediation: |
+  Set minReplicas to at least 2 and maxReplicas above it.
+query:
+  path: hpas[*]
+  where:
+    any:
+      - path: spec.minReplicas
+        exists: false
+      - path: spec.minReplicas
+        lt: 2
+      - path: spec.maxReplicas
+        equals_ref: spec.minReplicas
+---
+id: K8S_REL_012
+title: PodDisruptionBudget blocks all disruptions
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The PDB allows zero voluntary disruptions
+description: |
+  maxUnavailable 0 or minAvailable 100% blocks node drains, so cluster upgrades
+  and autoscaler scale-downs hang.
+remediation: |
+  Allow at least one pod to be disrupted (e.g. maxUnavailable: 1).
+query:
+  path: pdbs[*]
+  where:
+    any:
+      - path: spec.maxUnavailable
+        in: [0, "0", "0%"]
+      - path: spec.minAvailable
+        equals: "100%"
+---
+id: K8S_REL_013
+title: Job limits not configured
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: A Job or CronJob has no deadline, retry limit or concurrency policy
+description: |
+  Without activeDeadlineSeconds a stuck job runs forever; without
+  startingDeadlineSeconds and concurrencyPolicy, a CronJob can pile up
+  overlapping runs after an outage.
+remediation: |
+  Set activeDeadlineSeconds and backoffLimit on the job, and
+  startingDeadlineSeconds and concurrencyPolicy on CronJobs.
+query:
+  path: workloads[*]
+  where:
+    any:
+      - all:
+          - path: kind
+            in: [Job, CronJob]
+          - any:
+              - path: job.activeDeadlineSeconds
+                exists: false
+              - path: job.backoffLimit
+                exists: false
+      - all:
+          - path: kind
+            equals: CronJob
+          - any:
+              - path: spec.startingDeadlineSeconds
+                exists: false
+              - path: spec.concurrencyPolicy
+                exists: false
+---
+id: K8S_REL_014
+title: Service selects no pods
+severity: WARNING
+category: reliability
+target: kubernetes
+resource: kubernetes
+message: The Service selector matches no workload in the manifests
+description: |
+  A Service whose selector matches nothing has no endpoints, so traffic to it
+  fails, usually because of a label typo.
+remediation: |
+  Align spec.selector with the pod template labels of the target workload.
+query:
+  path: services[*]
+  where:
+    all:
+      - path: spec.selector
+        exists: true
+      - path: targets_pods
+        equals: false
+---
+id: K8S_NET_001
+title: Service exposed publicly
+severity: ERROR
+category: security
+target: kubernetes
+resource: kubernetes
+message: A LoadBalancer Service is internet-facing without source restrictions
+description: |
+  An external load balancer with no loadBalancerSourceRanges accepts traffic
+  from the entire internet.
+remediation: |
+  Use an internal load balancer annotation, restrict loadBalancerSourceRanges,
+  or expose the app through an Ingress / Gateway with authentication and TLS.
+query:
+  path: services[*]
+  where:
+    all:
+      - path: spec.type
+        equals: LoadBalancer
+      - path: spec.loadBalancerSourceRanges
+        exists: false
+      - not: { path: 'metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-internal"]', exists: true }
+      - not: { path: 'metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"]', equals: internal }
+      - not: { path: 'metadata.annotations["networking.gke.io/load-balancer-type"]', equals: Internal }
+      - not: { path: 'metadata.annotations["cloud.google.com/load-balancer-type"]', equals: Internal }
+      - not: { path: 'metadata.annotations["service.beta.kubernetes.io/azure-load-balancer-internal"]', equals: "true" }
+      - not: { path: 'metadata.annotations["service.beta.kubernetes.io/oci-load-balancer-internal"]', equals: "true" }
+---
+id: K8S_NET_002
+title: Network policy missing
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: No NetworkPolicy selects the workload's pods
+description: |
+  Pods without a NetworkPolicy accept traffic from every pod in the cluster and
+  can reach every other pod, so one compromised pod can move laterally.
+remediation: |
+  Add a default-deny NetworkPolicy per namespace and explicit allow policies for
+  the traffic each workload needs.
+query:
+  path: workloads[*]
+  where:
+    path: network_policy_selected
+    equals: false
+---
+id: K8S_NET_003
+title: Internal service exposed externally
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: A NodePort, or a database / internal service, is exposed outside the cluster
+description: |
+  NodePort opens the port on every node, and databases, caches or services
+  marked internal should only be reachable from inside the cluster.
+remediation: |
+  Use type ClusterIP for internal services and expose only edge services through
+  an Ingress or internal load balancer.
+query:
+  path: services[*]
+  where:
+    any:
+      - path: spec.type
+        equals: NodePort
+      - all:
+          - path: spec.type
+            in: [LoadBalancer, NodePort]
+          - any:
+              - path: 'spec.ports[*].port'
+                in: [5432, 3306, 1433, 1521, 27017, 6379, 9200, 9300, 5672, 9042, 11211, 2379, 8086]
+              - path: 'metadata.labels["exposure"]'
+                equals: internal
+---
+id: K8S_NET_004
+title: Ingress TLS not configured
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The Ingress serves traffic without TLS or with HTTPS redirect disabled
+description: |
+  Without TLS, credentials and session cookies cross the network in plaintext.
+remediation: |
+  Add spec.tls with a certificate for every host and keep HTTP-to-HTTPS
+  redirection enabled.
+query:
+  path: ingresses[*]
+  where:
+    any:
+      - path: spec.tls
+        exists: false
+      - path: 'metadata.annotations["nginx.ingress.kubernetes.io/ssl-redirect"]'
+        equals: "false"
+      - path: 'metadata.annotations["kubernetes.io/ingress.allow-http"]'
+        equals: "true"
+---
+id: K8S_NET_005
+title: External IP assigned to workload
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: A Service uses externalIPs or a container binds a hostPort
+description: |
+  externalIPs can be abused to intercept cluster traffic (CVE-2020-8554), and
+  hostPort exposes the container directly on the node, bypassing the Service
+  layer and limiting scheduling.
+remediation: |
+  Use LoadBalancer or Ingress instead of externalIPs, and remove hostPort.
+query:
+  any:
+    - path: services[*]
+      where:
+        path: spec.externalIPs
+        exists: true
+    - path: containers[*]
+      where:
+        path: 'ports[*].hostPort'
+        exists: true
+---
+id: K8S_NET_006
+title: Namespace has no default-deny NetworkPolicy
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: No NetworkPolicy denies ingress traffic by default in the namespace
+description: |
+  Without a default-deny policy, every new workload in the namespace starts
+  fully reachable until someone writes a policy for it.
+remediation: |
+  Add a NetworkPolicy with an empty podSelector and policyTypes [Ingress,
+  Egress], then allow required traffic explicitly.
+query:
+  path: namespaces[*]
+  where:
+    all:
+      - path: name
+        not_in: [kube-system, kube-public, kube-node-lease]
+      - path: has_default_deny_ingress
+        equals: false
+---
+id: K8S_NET_007
+title: Ingress rule without specific host
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The Ingress has a rule with no host, a wildcard host or a default backend
+description: |
+  Catch-all rules answer for any Host header, exposing the backend on every
+  domain pointed at the ingress controller.
+remediation: |
+  Set an explicit host on every rule and remove defaultBackend unless it is an
+  intentional error page.
+query:
+  path: ingresses[*]
+  where:
+    any:
+      - path: 'spec.rules[*]'
+        where:
+          path: host
+          exists: false
+      - path: 'spec.rules[*].host'
+        matches: '^\*'
+      - path: spec.defaultBackend
+        exists: true
+---
+id: K8S_NET_008
+title: ExternalName Service used
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The Service is of type ExternalName
+description: |
+  ExternalName creates a DNS alias to any hostname; combined with ingress
+  controllers it can be abused to proxy traffic to internal or external targets.
+remediation: |
+  Use a ClusterIP Service with explicit EndpointSlices, or an egress gateway.
+query:
+  path: services[*]
+  where:
+    path: spec.type
+    equals: ExternalName
+---
+id: K8S_NET_009
+title: Ingress snippet annotation used
+severity: WARNING
+category: security
+target: kubernetes
+resource: kubernetes
+message: The Ingress injects raw NGINX configuration through snippet annotations
+description: |
+  Snippet annotations insert arbitrary configuration into the shared ingress
+  controller and have been used to read controller secrets across namespaces.
+remediation: |
+  Replace snippets with supported annotations or controller-level configuration,
+  and keep allow-snippet-annotations disabled.
+query:
+  path: ingresses[*]
+  where:
+    any:
+      - path: 'metadata.annotations["nginx.ingress.kubernetes.io/configuration-snippet"]'
+        exists: true
+      - path: 'metadata.annotations["nginx.ingress.kubernetes.io/server-snippet"]'
+        exists: true
+      - path: 'metadata.annotations["nginx.ingress.kubernetes.io/auth-snippet"]'
+        exists: true
+      - path: 'metadata.annotations["nginx.ingress.kubernetes.io/stream-snippet"]'
+        exists: true
+---
+id: K8S_IMG_001
+title: Image uses latest tag
+severity: ERROR
+category: maintainability
+target: kubernetes
+resource: kubernetes
+message: The image uses the latest tag or no tag at all
+description: |
+  latest changes over time, so pods of the same Deployment can run different
+  code and rollbacks do not restore the previous version.
+remediation: |
+  Use an immutable version tag, ideally with a digest.
+query:
+  path: containers[*]
+  where:
+    any:
+      - path: image
+        matches: ':latest(@|$)'
+      - not: { path: 'image', matches: '(:[^/:@]+|@sha256:[a-f0-9]{64})$' }
+---
+id: K8S_IMG_002
+title: Image tag not pinned
+severity: ERROR
+category: maintainability
+target: kubernetes
+resource: kubernetes
+message: The image uses a floating tag such as a major version or channel name
+description: |
+  Tags like 1, 1.25, stable or alpine are moved to new builds by the publisher,
+  so nodes pulling at different times run different images.
+remediation: |
+  Use a full version tag (1.25.3) and pin the digest.
+query:
+  path: containers[*]
+  where:
+    all:
+      - not: { path: 'image', matches: '@sha256:' }
+      - path: image
+        matches: ':(stable|lts|edge|main|master|develop|dev|nightly|current|alpine|slim|bookworm|bullseye|jammy|noble|[0-9]+|[0-9]+\.[0-9]+)(-(alpine|slim|bookworm|bullseye))?$'
+---
+id: K8S_IMG_003
+title: Image digest not pinned
+severity: WARNING
+category: maintainability
+target: kubernetes
+resource: kubernetes
+message: The image is referenced by tag only, without a digest
+description: |
+  Tags are mutable; only a digest guarantees that every node runs exactly the
+  image that was tested and scanned.
+remediation: |
+  Reference images as name:tag@sha256:<digest> (tools such as kustomize, kbld or
+  Renovate can maintain digests).
+query:
+  path: containers[*]
+  where:
+    not: { path: 'image', matches: '@sha256:[a-f0-9]{64}$' }
+---
+id: K8S_IMG_004
+title: Image pull policy not configured
+severity: WARNING
+category: maintainability
+target: kubernetes
+resource: kubernetes
+message: imagePullPolicy is not set explicitly
+description: |
+  The default depends on the tag (Always for latest, IfNotPresent otherwise),
+  which makes behaviour change when the tag changes.
+remediation: |
+  Set imagePullPolicy explicitly (IfNotPresent with pinned digests, Always when
+  re-pulling is required for security).
+query:
+  path: containers[*]
+  where:
+    path: imagePullPolicy
+    exists: false
+---
+id: K8S_IMG_005
+title: Untrusted registry detected
+severity: WARNING
+category: maintainability
+target: kubernetes
+resource: kubernetes
+# The allow-list contains organisation placeholders; off by default until you
+# set your own registries.
+enabled: false
+message: The image comes from a registry outside the allowed list
+description: |
+  Images from arbitrary registries bypass your scanning, signing and
+  availability controls.
+remediation: |
+  Mirror the image into an approved registry and reference it from there;
+  enforce the list with an admission policy (Kyverno, Gatekeeper).
+query:
+  path: containers[*]
+  where:
+    not: { path: 'image', matches: '^((docker\.io/)?(library/)?[a-z0-9._-]+(:|@|$)|registry\.k8s\.io/|quay\.io/(prometheus|jetstack)/|gcr\.io/distroless/|cgr\.dev/chainguard/|mcr\.microsoft\.com/|registry\.example\.com/|ghcr\.io/example-org/)' }
+---
+id: K8S_PROD_001
+title: Monitoring annotations missing
+severity: WARNING
+category: operational
+target: kubernetes
+resource: kubernetes
+message: The workload is neither annotated for scraping nor selected by a ServiceMonitor
+description: |
+  Metrics from the workload are not collected, so dashboards and alerts have no
+  data for it.
+remediation: |
+  Add a ServiceMonitor / PodMonitor that selects the workload, or the
+  prometheus.io/scrape, prometheus.io/port and prometheus.io/path annotations on
+  the pod template.
+query:
+  path: workloads[*]
+  where:
+    all:
+      - path: kind
+        not_in: [Job, CronJob]
+      - not: { path: 'pod_metadata.annotations["prometheus.io/scrape"]', equals: "true" }
+      - path: monitor_selected
+        equals: false
+---
+id: K8S_PROD_002
+title: Logging integration not detected
+severity: WARNING
+category: operational
+target: kubernetes
+resource: kubernetes
+# Depends on cluster-level tooling being in the same manifests; off by default.
+enabled: false
+message: No log collection agent is deployed in the manifests
+description: |
+  Container logs live on the node only until rotation or pod deletion; without a
+  collector they are lost when they are needed for an incident.
+remediation: |
+  Deploy a log agent DaemonSet (Fluent Bit, Vector, Promtail / Alloy, Filebeat,
+  Datadog) or confirm the managed platform collects logs.
+query:
+  not:
+    path: workloads[*]
+    where:
+      all:
+        - path: kind
+          equals: DaemonSet
+        - path: 'pod.containers[*].image'
+          matches: '(fluent-bit|fluentbit|fluentd|vector|promtail|grafana/alloy|filebeat|elastic-agent|datadog/agent|splunk|otel/opentelemetry-collector|opentelemetry-collector)'
+---
+id: K8S_PROD_003
+title: Backup strategy not detected
+severity: WARNING
+category: operational
+target: kubernetes
+resource: kubernetes
+# Depends on cluster-level backup tooling; off by default.
+enabled: false
+message: Persistent data exists but no backup schedule is defined
+description: |
+  PersistentVolumes are not backed up by Kubernetes; losing the volume or the
+  cluster loses the data.
+remediation: |
+  Define backup schedules with Velero, K8up, Kasten or VolumeSnapshot automation
+  for every namespace with persistent data.
+query:
+  all:
+    - any:
+        - path: resources[*]
+          where:
+            path: kind
+            equals: PersistentVolumeClaim
+        - path: workloads[*]
+          where:
+            path: spec.volumeClaimTemplates
+            exists: true
+    - not:
+        path: resources[*]
+        where:
+          any:
+            - all:
+                - path: kind
+                  equals: Schedule
+                - path: apiVersion
+                  matches: '^(velero\.io|k8up\.io)/'
+            - path: kind
+              in: [VolumeSnapshotSchedule, SnapshotSchedule, BackupSchedule, Policy]
+---
+id: K8S_PROD_004
+title: Alerting integration not detected
+severity: WARNING
+category: operational
+target: kubernetes
+resource: kubernetes
+# Depends on cluster-level alerting resources; off by default.
+enabled: false
+message: No alerting rules or Alertmanager configuration are defined
+description: |
+  Without alert rules, failures are discovered by users rather than by the team.
+remediation: |
+  Add PrometheusRule resources (or your platform's equivalent) with alerts for
+  availability, error rate and saturation.
+query:
+  not:
+    path: resources[*]
+    where:
+      path: kind
+      in: [PrometheusRule, AlertmanagerConfig, VMRule, Alert]
+---
+id: K8S_PROD_005
+title: Ownership metadata missing
+severity: WARNING
+category: operational
+target: kubernetes
+resource: kubernetes
+message: The workload lacks standard name labels or an owner / team label
+description: |
+  Without ownership labels, on-call engineers cannot tell who owns a failing
+  workload, and cost / policy tooling cannot attribute it.
+remediation: |
+  Add app.kubernetes.io/name (and part-of, version) plus an owner or team label.
+query:
+  path: workloads[*]
+  where:
+    any:
+      - path: 'metadata.labels["app.kubernetes.io/name"]'
+        exists: false
+      - all:
+          - path: 'metadata.labels["team"]'
+            exists: false
+          - path: 'metadata.labels["owner"]'
+            exists: false
+          - path: 'metadata.annotations["owner"]'
+            exists: false
+---
+id: K8S_PROD_006
+title: Deprecated or removed API version
+severity: WARNING
+category: operational
+target: kubernetes
+resource: kubernetes
+message: The manifest uses an API version removed from current Kubernetes releases
+description: |
+  Removed apiVersions (extensions/v1beta1, policy/v1beta1, batch/v1beta1,
+  autoscaling/v2beta2...) fail to apply after a cluster upgrade, and
+  PodSecurityPolicy no longer exists.
+remediation: |
+  Migrate to the stable API versions (apps/v1, networking.k8s.io/v1, policy/v1,
+  batch/v1, autoscaling/v2) and replace PSPs with Pod Security Admission.
+query:
+  path: resources[*]
+  where:
+    any:
+      - path: kind
+        equals: PodSecurityPolicy
+      - path: apiVersion
+        in: [extensions/v1beta1, apps/v1beta1, apps/v1beta2, networking.k8s.io/v1beta1, policy/v1beta1, batch/v1beta1, batch/v2alpha1, autoscaling/v2beta1, autoscaling/v2beta2, rbac.authorization.k8s.io/v1beta1, admissionregistration.k8s.io/v1beta1, apiextensions.k8s.io/v1beta1, scheduling.k8s.io/v1beta1, coordination.k8s.io/v1beta1, certificates.k8s.io/v1beta1, discovery.k8s.io/v1beta1, events.k8s.io/v1beta1, node.k8s.io/v1beta1, flowcontrol.apiserver.k8s.io/v1beta1, flowcontrol.apiserver.k8s.io/v1beta2, flowcontrol.apiserver.k8s.io/v1beta3]
+---
+id: K8S_PROD_007
+title: Duplicate environment variable
+severity: WARNING
+category: operational
+target: kubernetes
+resource: kubernetes
+message: The same environment variable name is defined more than once
+description: |
+  Only the last definition takes effect, so a duplicate silently overrides the
+  intended value.
+remediation: |
+  Remove the duplicate entry.
+query:
+  path: containers[*]
+  where:
+    path: env_duplicate_names
+    length_gte: 1

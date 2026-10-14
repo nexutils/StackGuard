@@ -1,0 +1,4 @@
+services:
+  app:
+    image: x:1
+    ports: ["8000-8100:8000-8100"]

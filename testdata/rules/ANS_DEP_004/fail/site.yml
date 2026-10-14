@@ -1,0 +1,9 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: copy
+      ansible.builtin.copy:
+        src: ../../outside.conf
+        dest: /etc/app.conf
+        mode: "0644"

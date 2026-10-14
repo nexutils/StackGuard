@@ -1,0 +1,26 @@
+# Example StackGuard configuration.
+# Place this file at the root of your repository as .stackguard.yaml.
+
+# Rules that never run.
+disabled_rules:
+  - JENK_SEC_001   # every agent in our fleet is ephemeral
+
+# Change the severity of individual rules.
+severity_overrides:
+  COMP_REL_001: ERROR
+  K8S_REL_003: WARNING
+
+# Paths to skip, relative to each scanned directory.
+exclude:
+  - "**/vendor/**"
+  - "*.generated.yaml"
+
+# Extra rule directories (relative to this file). Rules here override
+# built-in rules with the same ID.
+# rules_dirs:
+#   - ./policies
+
+# Exit with code 1 when a finding at or above this severity exists
+# (ERROR, WARNING, INFO or none), or when the score drops below min_score.
+fail_on: ERROR
+min_score: 0

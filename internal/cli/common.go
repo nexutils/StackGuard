@@ -42,6 +42,7 @@ func (a *app) loadConfig(cmd *cobra.Command, bindings ...flagBinding) (config.Re
 	v.SetDefault("fail_on", def.FailOn)
 	v.SetDefault("min_score", def.MinScore)
 	v.SetDefault("format", def.Format)
+	v.SetDefault("profile", "")
 
 	v.SetEnvPrefix("STACKGUARD")
 	v.SetEnvKeyReplacer(strings.NewReplacer("-", "_"))

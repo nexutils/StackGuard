@@ -190,6 +190,101 @@ func TestCompileErrorsSurface(t *testing.T) {
 	}
 }
 
+func ruleWithCategory(t testing.TB, id string, sev models.Severity, cat string) *models.Rule {
+	t.Helper()
+	r := rule(t, id, sev, `{path: privileged, equals: true}`)
+	r.Category = cat
+	return r
+}
+
+func TestProfileQuickFiltering(t *testing.T) {
+	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity)
+	warnSec := ruleWithCategory(t, "SEC_002", models.SeverityWarning, models.CategorySecurity)
+	errorOps := ruleWithCategory(t, "OPS_001", models.SeverityError, models.CategoryOperational)
+	warnOps := ruleWithCategory(t, "OPS_002", models.SeverityWarning, models.CategoryOperational)
+	infoSec := ruleWithCategory(t, "SEC_003", models.SeverityInfo, models.CategorySecurity)
+	errorRel := ruleWithCategory(t, "REL_001", models.SeverityError, models.CategoryReliability)
+
+	all := []*models.Rule{errorSec, warnSec, errorOps, warnOps, infoSec, errorRel}
+
+	e := newEngine(t, Options{Profile: models.ProfileQuick}, all...)
+	ids := ruleIDs(e)
+	want := map[string]bool{"SEC_001": true, "REL_001": true}
+	if len(ids) != len(want) {
+		t.Fatalf("quick profile rules = %v, want %v", ids, want)
+	}
+	for _, id := range ids {
+		if !want[id] {
+			t.Errorf("unexpected rule in quick profile: %s", id)
+		}
+	}
+}
+
+func TestProfileStandardFiltering(t *testing.T) {
+	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity)
+	warnPerf := ruleWithCategory(t, "PERF_001", models.SeverityWarning, models.CategoryPerformance)
+	infoSec := ruleWithCategory(t, "SEC_002", models.SeverityInfo, models.CategorySecurity)
+
+	e := newEngine(t, Options{Profile: models.ProfileStandard}, errorSec, warnPerf, infoSec)
+	ids := ruleIDs(e)
+	want := map[string]bool{"SEC_001": true, "PERF_001": true}
+	if len(ids) != len(want) {
+		t.Fatalf("standard profile rules = %v, want %v", ids, want)
+	}
+	for _, id := range ids {
+		if !want[id] {
+			t.Errorf("unexpected rule in standard profile: %s", id)
+		}
+	}
+}
+
+func TestProfileStrictFiltering(t *testing.T) {
+	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity)
+	infoPerf := ruleWithCategory(t, "PERF_001", models.SeverityInfo, models.CategoryPerformance)
+	offByDefault := ruleWithCategory(t, "ORG_001", models.SeverityWarning, models.CategorySecurity)
+	offByDefault.OffByDefault = true
+
+	e := newEngine(t, Options{Profile: models.ProfileStrict}, errorSec, infoPerf, offByDefault)
+	ids := ruleIDs(e)
+	if len(ids) != 3 {
+		t.Fatalf("strict profile rules = %v, want all 3", ids)
+	}
+}
+
+func TestProfileQuickWithExplicitEnable(t *testing.T) {
+	warnOps := ruleWithCategory(t, "OPS_001", models.SeverityWarning, models.CategoryOperational)
+
+	e := newEngine(t, Options{
+		Profile:      models.ProfileQuick,
+		EnabledRules: []string{"OPS_001"},
+	}, warnOps)
+	ids := ruleIDs(e)
+	if len(ids) != 1 || ids[0] != "OPS_001" {
+		t.Errorf("explicit --enable should override quick filter, got %v", ids)
+	}
+}
+
+func TestProfileStrictOffByDefaultDisabled(t *testing.T) {
+	offByDefault := ruleWithCategory(t, "ORG_001", models.SeverityWarning, models.CategorySecurity)
+	offByDefault.OffByDefault = true
+
+	e := newEngine(t, Options{
+		Profile:       models.ProfileStrict,
+		DisabledRules: []string{"ORG_001"},
+	}, offByDefault)
+	if len(e.Rules()) != 0 {
+		t.Error("--disable should still exclude off-by-default rules even in strict")
+	}
+}
+
+func ruleIDs(e *Engine) []string {
+	var ids []string
+	for _, r := range e.Rules() {
+		ids = append(ids, r.Rule.ID)
+	}
+	return ids
+}
+
 func BenchmarkEvaluate(b *testing.B) {
 	rules := []*models.Rule{
 		rule(b, "COMP_SEC_001", models.SeverityError, `{path: privileged, equals: true}`),

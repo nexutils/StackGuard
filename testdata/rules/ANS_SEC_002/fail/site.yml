@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  vars:
+    api_secret: s3cr3tvalue
+  tasks:
+    - name: ping
+      ansible.builtin.ping:

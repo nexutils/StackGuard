@@ -1,0 +1,13 @@
+pipeline {
+    agent { label 'linux' }
+    environment {
+        PASS = credentials('deploy-pass')
+    }
+    stages {
+        stage('Build') {
+            steps {
+                sh "deploy --password=${PASS}"
+            }
+        }
+    }
+}

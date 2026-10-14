@@ -1,0 +1,6 @@
+---
+- name: p
+  hosts: production
+  tasks:
+    - name: deploy
+      ansible.builtin.ping:
