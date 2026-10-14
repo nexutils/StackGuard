@@ -80,14 +80,14 @@ func ParsePath(s string) (Path, error) {
 	expectSegment := true
 	for i < len(s) {
 		c := s[i]
-		switch {
-		case c == '.':
+		switch c {
+		case '.':
 			if expectSegment {
 				return p, fmt.Errorf("path %q: empty segment at offset %d", s, i)
 			}
 			expectSegment = true
 			i++
-		case c == '[':
+		case '[':
 			seg, n, err := parseBracket(s, i)
 			if err != nil {
 				return p, err
@@ -95,7 +95,7 @@ func ParsePath(s string) (Path, error) {
 			p.segs = append(p.segs, seg)
 			expectSegment = false
 			i += n
-		case c == '"':
+		case '"':
 			if !expectSegment {
 				return p, fmt.Errorf("path %q: missing '.' before quoted key at offset %d", s, i)
 			}

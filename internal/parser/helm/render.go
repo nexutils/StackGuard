@@ -43,7 +43,7 @@ func loadChart(chartYAML string) (*chartDir, error) {
 		return nil, err
 	}
 	if err := yaml.Unmarshal(data, &c.chart); err != nil {
-		return nil, fmt.Errorf("Chart.yaml: %w", err)
+		return nil, fmt.Errorf("chart.yaml: %w", err)
 	}
 	if vdata, err := os.ReadFile(filepath.Join(dir, "values.yaml")); err == nil {
 		_ = yaml.Unmarshal(vdata, &c.values)

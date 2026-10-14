@@ -37,11 +37,10 @@ func New() *Parser {
 func (*Parser) Name() string { return Target }
 
 func (p *Parser) CanParse(f *parser.FileInfo) bool {
-	base := f.Base()
-	switch {
-	case base == "Chart.yaml":
+	switch base := f.Base(); base {
+	case "Chart.yaml":
 		return true
-	case base == "values.yaml":
+	case "values.yaml":
 		return p.exists(filepath.Join(filepath.Dir(f.Path), "Chart.yaml"))
 	default:
 		return p.templateFile(f.Path)

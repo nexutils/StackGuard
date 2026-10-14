@@ -26,8 +26,7 @@ type object struct {
 	line             int
 }
 
-func (o object) labels() map[string]any      { return mapAt(o.props, "metadata", "labels") }
-func (o object) annotations() map[string]any { return mapAt(o.props, "metadata", "annotations") }
+func (o object) labels() map[string]any { return mapAt(o.props, "metadata", "labels") }
 
 // podSpec returns the object's pod spec, if it is a workload kind.
 func (o object) podSpec() map[string]any {
@@ -196,7 +195,7 @@ func buildWorkload(o object, idx *index) map[string]any {
 
 // buildContainers flattens every container of a workload with its effective
 // securityContext.
-func buildContainers(o object, idx *index) []any {
+func buildContainers(o object, _ *index) []any {
 	pod := o.podSpec()
 	if pod == nil {
 		return nil

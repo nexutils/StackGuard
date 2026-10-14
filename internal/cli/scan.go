@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -140,8 +139,8 @@ func (a *app) runScan(cmd *cobra.Command, sf *scanFlags, paths []string, interac
 
 func (a *app) writeReport(format, output string, quiet, showPassed, omitSkipped bool, rep *models.Report) error {
 	var (
-		w     io.Writer = a.out
-		color           = a.colorEnabled(a.out)
+		w     = a.out
+		color = a.colorEnabled(a.out)
 	)
 	if output != "" {
 		f, err := os.Create(output)

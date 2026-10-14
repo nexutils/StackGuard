@@ -17,12 +17,10 @@ type builder struct {
 	lineOf     func(int) int
 	locs       map[string]models.Position
 
-	steps     []any
-	stages    []any
-	agents    []any
-	env       []any
-	libraries []any
-
+	steps       []any
+	stages      []any
+	agents      []any
+	env         []any
 	declarative bool
 	seenInput   bool
 }
@@ -128,12 +126,12 @@ func (b *builder) build(root *block) (map[string]any, map[string]models.Position
 		if ab := findChild(pipe, "agent"); ab != nil {
 			topType, topLabel = b.parseAgent(ab)
 			b.addAgent(topType, topLabel, ab, nil)
-		} else if t, l := inlineAgent(b.childlessCode(pipe)); t != "" {
-			topType, topLabel = t, l
-			b.addAgent(t, l, nil, nil)
+		} else if t := inlineAgent(b.childlessCode(pipe)); t != "" {
+			topType = t
+			b.addAgent(t, "", nil, nil)
 		}
 	} else {
-		topType, topLabel = b.scriptedAgent(root)
+		topType, topLabel = "node", b.scriptedAgent(root)
 		if topType != "" {
 			b.addAgent(topType, topLabel, findChild(root, "node"), nil)
 		}
@@ -243,9 +241,9 @@ func (b *builder) walkStage(stage *block, ctx walkCtx) {
 	if a := findChild(stage, "agent"); a != nil {
 		at, al = b.parseAgent(a)
 		b.addAgent(at, al, a, sa)
-	} else if t, l := inlineAgent(b.childlessCode(stage)); t != "" {
-		at, al = t, l
-		b.addAgent(t, l, nil, sa)
+	} else if t := inlineAgent(b.childlessCode(stage)); t != "" {
+		at, al = t, ""
+		b.addAgent(t, "", nil, sa)
 	}
 	sa.agentType, sa.agentLabel = at, al
 
@@ -395,11 +393,11 @@ var shRe = regexp.MustCompile(`\b(sh|bat|powershell|pwsh)\s*\(?\s*(?:script\s*:\
 var leafRe = regexp.MustCompile(`(?m)(?:^|[;{}])[ \t]*([a-zA-Z_]\w*)\b`)
 
 // inlineAgent detects the brace-less agent directives `agent any` / `agent none`.
-func inlineAgent(code string) (atype, label string) {
+func inlineAgent(code string) (atype string) {
 	if m := regexp.MustCompile(`\bagent\s+(any|none)\b`).FindStringSubmatch(code); m != nil {
-		return m[1], ""
+		return m[1]
 	}
-	return "", ""
+	return ""
 }
 
 // addLeafSteps extracts the leaf steps that sit directly in a region's body.
@@ -570,11 +568,11 @@ func (b *builder) parseAgent(agent *block) (atype, label string) {
 	return "custom", ""
 }
 
-func (b *builder) scriptedAgent(root *block) (atype, label string) {
+func (b *builder) scriptedAgent(root *block) (label string) {
 	if n := findChild(root, "node"); n != nil {
-		return "node", headerArg(b.text, n)
+		return headerArg(b.text, n)
 	}
-	return "node", ""
+	return ""
 }
 
 func (b *builder) addAgent(atype, label string, agent *block, _ *stageAcc) {

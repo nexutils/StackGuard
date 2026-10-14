@@ -413,7 +413,7 @@ func (m *mb) readInventory(data []byte) {
 				walk(child)
 			}
 		}
-		walk(map[string]any(vars))
+		walk(vars)
 		m.collectStringsBytes(data)
 		return
 	}
@@ -517,7 +517,7 @@ func roleRefs(v any) []string {
 	return out
 }
 
-func roleVarsWithoutDefault(roleDir, name string, defined map[string]bool) []any {
+func roleVarsWithoutDefault(roleDir, _ string, defined map[string]bool) []any {
 	used := map[string]bool{}
 	ref := regexp.MustCompile(`\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*(\|[^}]*)?\}\}`)
 	_ = filepath.WalkDir(filepath.Join(roleDir, "tasks"), func(p string, d os.DirEntry, err error) error {

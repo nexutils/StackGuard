@@ -117,30 +117,6 @@ func (*Parser) Parse(_ context.Context, src parser.Source) ([]models.Resource, e
 	return []models.Resource{*res}, nil
 }
 
-func classify(b *hclsyntax.Block) (typ, name string) {
-	labels := b.Labels
-	switch b.Type {
-	case "resource", "data":
-		if len(labels) != 2 {
-			return "", ""
-		}
-		return b.Type + "." + labels[0], labels[0] + "." + labels[1]
-	case "provider":
-		if len(labels) != 1 {
-			return "", ""
-		}
-		return "provider." + labels[0], labels[0]
-	case "module", "variable", "output":
-		if len(labels) != 1 {
-			return "", ""
-		}
-		return b.Type, labels[0]
-	case "terraform", "locals":
-		return b.Type, b.Type
-	}
-	return "", ""
-}
-
 func convertBody(body *hclsyntax.Body, prefix string, src []byte, locs map[string]models.Position) map[string]any {
 	props := map[string]any{}
 	for name, attr := range body.Attributes {

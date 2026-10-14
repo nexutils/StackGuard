@@ -190,21 +190,20 @@ func TestCompileErrorsSurface(t *testing.T) {
 	}
 }
 
-func ruleWithCategory(t testing.TB, id string, sev models.Severity, cat string, query string) *models.Rule {
+func ruleWithCategory(t testing.TB, id string, sev models.Severity, cat string) *models.Rule {
 	t.Helper()
-	r := rule(t, id, sev, query)
+	r := rule(t, id, sev, `{path: privileged, equals: true}`)
 	r.Category = cat
 	return r
 }
 
 func TestProfileQuickFiltering(t *testing.T) {
-	q := `{path: privileged, equals: true}`
-	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity, q)
-	warnSec := ruleWithCategory(t, "SEC_002", models.SeverityWarning, models.CategorySecurity, q)
-	errorOps := ruleWithCategory(t, "OPS_001", models.SeverityError, models.CategoryOperational, q)
-	warnOps := ruleWithCategory(t, "OPS_002", models.SeverityWarning, models.CategoryOperational, q)
-	infoSec := ruleWithCategory(t, "SEC_003", models.SeverityInfo, models.CategorySecurity, q)
-	errorRel := ruleWithCategory(t, "REL_001", models.SeverityError, models.CategoryReliability, q)
+	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity)
+	warnSec := ruleWithCategory(t, "SEC_002", models.SeverityWarning, models.CategorySecurity)
+	errorOps := ruleWithCategory(t, "OPS_001", models.SeverityError, models.CategoryOperational)
+	warnOps := ruleWithCategory(t, "OPS_002", models.SeverityWarning, models.CategoryOperational)
+	infoSec := ruleWithCategory(t, "SEC_003", models.SeverityInfo, models.CategorySecurity)
+	errorRel := ruleWithCategory(t, "REL_001", models.SeverityError, models.CategoryReliability)
 
 	all := []*models.Rule{errorSec, warnSec, errorOps, warnOps, infoSec, errorRel}
 
@@ -222,10 +221,9 @@ func TestProfileQuickFiltering(t *testing.T) {
 }
 
 func TestProfileStandardFiltering(t *testing.T) {
-	q := `{path: privileged, equals: true}`
-	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity, q)
-	warnPerf := ruleWithCategory(t, "PERF_001", models.SeverityWarning, models.CategoryPerformance, q)
-	infoSec := ruleWithCategory(t, "SEC_002", models.SeverityInfo, models.CategorySecurity, q)
+	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity)
+	warnPerf := ruleWithCategory(t, "PERF_001", models.SeverityWarning, models.CategoryPerformance)
+	infoSec := ruleWithCategory(t, "SEC_002", models.SeverityInfo, models.CategorySecurity)
 
 	e := newEngine(t, Options{Profile: models.ProfileStandard}, errorSec, warnPerf, infoSec)
 	ids := ruleIDs(e)
@@ -241,10 +239,9 @@ func TestProfileStandardFiltering(t *testing.T) {
 }
 
 func TestProfileStrictFiltering(t *testing.T) {
-	q := `{path: privileged, equals: true}`
-	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity, q)
-	infoPerf := ruleWithCategory(t, "PERF_001", models.SeverityInfo, models.CategoryPerformance, q)
-	offByDefault := ruleWithCategory(t, "ORG_001", models.SeverityWarning, models.CategorySecurity, q)
+	errorSec := ruleWithCategory(t, "SEC_001", models.SeverityError, models.CategorySecurity)
+	infoPerf := ruleWithCategory(t, "PERF_001", models.SeverityInfo, models.CategoryPerformance)
+	offByDefault := ruleWithCategory(t, "ORG_001", models.SeverityWarning, models.CategorySecurity)
 	offByDefault.OffByDefault = true
 
 	e := newEngine(t, Options{Profile: models.ProfileStrict}, errorSec, infoPerf, offByDefault)
@@ -255,11 +252,10 @@ func TestProfileStrictFiltering(t *testing.T) {
 }
 
 func TestProfileQuickWithExplicitEnable(t *testing.T) {
-	q := `{path: privileged, equals: true}`
-	warnOps := ruleWithCategory(t, "OPS_001", models.SeverityWarning, models.CategoryOperational, q)
+	warnOps := ruleWithCategory(t, "OPS_001", models.SeverityWarning, models.CategoryOperational)
 
 	e := newEngine(t, Options{
-		Profile:     models.ProfileQuick,
+		Profile:      models.ProfileQuick,
 		EnabledRules: []string{"OPS_001"},
 	}, warnOps)
 	ids := ruleIDs(e)
@@ -269,8 +265,7 @@ func TestProfileQuickWithExplicitEnable(t *testing.T) {
 }
 
 func TestProfileStrictOffByDefaultDisabled(t *testing.T) {
-	q := `{path: privileged, equals: true}`
-	offByDefault := ruleWithCategory(t, "ORG_001", models.SeverityWarning, models.CategorySecurity, q)
+	offByDefault := ruleWithCategory(t, "ORG_001", models.SeverityWarning, models.CategorySecurity)
 	offByDefault.OffByDefault = true
 
 	e := newEngine(t, Options{

@@ -112,26 +112,26 @@ func lex(s string) ([]token, error) {
 	line := 1
 	for i := 0; i < len(s); {
 		c := s[i]
-		switch {
-		case c == '\n':
+		switch c {
+		case '\n':
 			line++
 			i++
-		case c == ' ' || c == '\t' || c == '\r':
+		case ' ', '\t', '\r':
 			i++
-		case c == '#':
+		case '#':
 			for i < len(s) && s[i] != '\n' {
 				i++
 			}
-		case c == ';':
+		case ';':
 			toks = append(toks, token{tSemi, ";", line})
 			i++
-		case c == '{':
+		case '{':
 			toks = append(toks, token{tOpen, "{", line})
 			i++
-		case c == '}':
+		case '}':
 			toks = append(toks, token{tClose, "}", line})
 			i++
-		case c == '"' || c == '\'':
+		case '"', '\'':
 			start := line
 			var b strings.Builder
 			j := i + 1
