@@ -4,6 +4,8 @@ Production-readiness scanner for infrastructure and deployment configuration.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-green)](LICENSE)
 [![Go](https://img.shields.io/badge/built%20with-Go-00ADD8)](https://go.dev)
+[![Downloads](https://img.shields.io/github/downloads/nexutils/StackGuard/total)](https://github.com/nexutils/StackGuard/releases)
+[![GitHub stars](https://img.shields.io/github/stars/nexutils/StackGuard)](https://github.com/nexutils/StackGuard)
 
 StackGuard checks your Dockerfiles, Compose files, Kubernetes manifests, Helm charts,
 Terraform modules, GitHub Actions workflows, Jenkinsfiles, Ansible playbooks and nginx

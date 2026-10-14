@@ -1,0 +1,74 @@
+name: shop
+
+x-hardened: &hardened
+  restart: unless-stopped
+  read_only: true
+  init: true
+  user: "10001:10001"
+  pull_policy: always
+  platform: linux/amd64
+  stop_grace_period: 30s
+  cap_drop: [ALL]
+  security_opt:
+    - "no-new-privileges:true"
+  mem_limit: 512m
+  memswap_limit: 512m
+  mem_reservation: 256m
+  cpus: 1.0
+  pids_limit: 200
+  ulimits:
+    nofile: 4096
+  tmpfs:
+    - "/tmp:size=64m,noexec,nosuid"
+  logging:
+    driver: journald
+  networks: [backend]
+
+x-health: &health
+  interval: 30s
+  timeout: 5s
+  retries: 3
+  start_period: 20s
+
+services:
+  api:
+    <<: *hardened
+    image: ghcr.io/example-org/api:1.4.2@sha256:1111111111111111111111111111111111111111111111111111111111111111
+    deploy:
+      replicas: 2
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DB_PASSWORD_FILE: /run/secrets/db_password
+      DATABASE_HOST: db
+    secrets: [db_password]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      <<: *health
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/healthz"]
+
+  db:
+    <<: *hardened
+    image: postgres:16.3.2@sha256:2222222222222222222222222222222222222222222222222222222222222222
+    shm_size: 256mb
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_password
+    secrets: [db_password]
+    volumes:
+      - "pgdata:/var/lib/postgresql/data"
+    healthcheck:
+      <<: *health
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+
+networks:
+  backend:
+    internal: true
+
+volumes:
+  pgdata: {}
+
+secrets:
+  db_password:
+    file: ./secrets/db_password.txt
