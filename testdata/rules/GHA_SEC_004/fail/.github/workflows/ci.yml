@@ -1,0 +1,7 @@
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: tj-actions/changed-files@v44

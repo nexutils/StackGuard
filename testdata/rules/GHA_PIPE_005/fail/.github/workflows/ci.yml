@@ -1,0 +1,9 @@
+name: CI
+on: [push]
+concurrency: {group: ci}
+jobs:
+  build:
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4

@@ -1,0 +1,10 @@
+name: Deploy
+on: [push]
+concurrency: {group: deploy}
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: staging
+    steps:
+      - run: kubectl apply -f k8s/

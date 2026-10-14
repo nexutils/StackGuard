@@ -1,0 +1,7 @@
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: some-owner/some-action@main

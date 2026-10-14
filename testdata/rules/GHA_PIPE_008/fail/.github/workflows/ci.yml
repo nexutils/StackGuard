@@ -1,0 +1,10 @@
+name: Deploy
+on: [push]
+concurrency: {group: deploy}
+jobs:
+  deploy-prod:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Smoke health check
+        run: kubectl rollout status deploy/app

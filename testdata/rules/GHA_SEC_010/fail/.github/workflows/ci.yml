@@ -1,0 +1,9 @@
+name: CI
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          curl -o install.sh https://example.com/install.sh
+          sh install.sh
