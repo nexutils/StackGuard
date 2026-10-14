@@ -1,0 +1,924 @@
+# helm chart rules for StackGuard.
+
+id: HELM_SEC_001
+title: Container runs as root
+severity: ERROR
+category: security
+target: helm
+resource: helm
+message: The container is explicitly configured to run as UID 0
+description: |
+  A root process inside the container is root on the host if it escapes the
+  container through a kernel or runtime vulnerability.
+remediation: |
+  Default podSecurityContext.runAsUser (and securityContext.runAsUser) to a
+  non-zero UID in values.yaml and render it in the pod template.
+query:
+  path: rendered.containers[*]
+  where:
+    path: sc.runAsUser
+    equals: 0
+---
+id: HELM_SEC_002
+title: runAsNonRoot not configured
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: runAsNonRoot is not set to true
+description: |
+  Without runAsNonRoot the kubelet starts the container as whatever user the
+  image defines, which is root for most images.
+remediation: |
+  Add runAsNonRoot: true to the default podSecurityContext in values.yaml.
+query:
+  path: rendered.containers[*]
+  where:
+    any:
+      - path: sc.runAsNonRoot
+        exists: false
+      - path: sc.runAsNonRoot
+        equals: false
+---
+id: HELM_SEC_003
+title: readOnlyRootFilesystem not enabled
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: The container's root filesystem is writable
+description: |
+  A writable root filesystem lets an attacker drop binaries, modify the
+  application or persist changes inside the container.
+remediation: |
+  Default securityContext.readOnlyRootFilesystem: true in values.yaml and
+  template emptyDir volumes for paths that must be writable.
+query:
+  path: rendered.containers[*]
+  where:
+    any:
+      - path: sc.readOnlyRootFilesystem
+        exists: false
+      - path: sc.readOnlyRootFilesystem
+        equals: false
+---
+id: HELM_SEC_004
+title: allowPrivilegeEscalation not disabled
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: allowPrivilegeEscalation is not set to false
+description: |
+  Processes can gain more privileges than their parent through setuid binaries
+  or file capabilities (no_new_privs is not set).
+remediation: |
+  Default securityContext.allowPrivilegeEscalation: false in values.yaml.
+query:
+  path: rendered.containers[*]
+  where:
+    any:
+      - path: sc.allowPrivilegeEscalation
+        exists: false
+      - path: sc.allowPrivilegeEscalation
+        equals: true
+---
+id: HELM_SEC_005
+title: Privileged container enabled
+severity: ERROR
+category: security
+target: helm
+resource: helm
+message: The container runs in privileged mode
+description: |
+  A privileged container has all capabilities and access to host devices; it is
+  effectively root on the node.
+remediation: |
+  Remove privileged: true; if a feature needs it, gate it behind a value that
+  defaults to false.
+query:
+  path: rendered.containers[*]
+  where:
+    path: sc.privileged
+    equals: true
+---
+id: HELM_SEC_006
+title: Capabilities are not dropped
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: The container does not drop ALL Linux capabilities
+description: |
+  Container runtimes grant a default capability set (including NET_RAW, CHOWN,
+  SETUID) that most applications never need.
+remediation: |
+  Default securityContext.capabilities.drop: [ALL] in values.yaml.
+query:
+  path: rendered.containers[*]
+  where:
+    not:
+      path: sc.capabilities.drop
+      contains_any: [ALL, all]
+---
+id: HELM_SEC_007
+title: Seccomp profile not configured
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: No seccomp profile is applied, or it is Unconfined
+description: |
+  Without seccomp, the container can call every syscall, including rarely used
+  ones that are common kernel exploit vectors.
+remediation: |
+  Default podSecurityContext.seccompProfile.type: RuntimeDefault in values.yaml.
+query:
+  path: rendered.containers[*]
+  where:
+    not:
+      path: sc.seccompProfile.type
+      in: [RuntimeDefault, Localhost]
+---
+id: HELM_SEC_008
+title: AppArmor profile not configured
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: No AppArmor profile is applied, or it is Unconfined
+description: |
+  AppArmor restricts file, network and capability access per program; an
+  unconfined container loses that layer on AppArmor-enabled nodes.
+remediation: |
+  Default securityContext.appArmorProfile.type: RuntimeDefault in values.yaml
+  (Kubernetes 1.30+), or template the annotation for older clusters.
+query:
+  path: rendered.containers[*]
+  where:
+    not:
+      path: sc.appArmorProfile.type
+      in: [RuntimeDefault, Localhost]
+---
+id: HELM_SEC_009
+title: Secret hardcoded in values.yaml
+severity: ERROR
+category: security
+target: helm
+resource: helm
+message: A password, token or key has a literal default in a values file
+description: |
+  values.yaml is committed with the chart and published to chart repositories;
+  every install that keeps the default shares the same secret.
+remediation: |
+  Leave secret values empty by default, support an existingSecret value, and
+  generate random defaults with randAlphaNum + lookup when appropriate.
+query:
+  any:
+    - path: values_entries[*]
+      where:
+        all:
+          - path: key
+            matches: '(?i)(password|passwd|pwd|secret|token|api_?key|private_?key|access_?key|credentials?)'
+          - not:
+              path: key
+              matches: '(?i)(existing|secretname|secretkey|keyref|keyname|key$|ref$|file$|path$|enabled$)'
+          - path: value
+            matches: '\S'
+          - not:
+              path: value
+              matches: '^\s*(\{\{|\$\{)'
+    - path: values_entries[*]
+      where:
+        path: value
+        matches: '(-----BEGIN [A-Z ]*PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{36}|github_pat_[A-Za-z0-9_]{50,}|xox[abprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{20,}|(AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})'
+---
+id: HELM_SEC_010
+title: Kubernetes Secret not used
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: Sensitive values are rendered as plain env or ConfigMap data, or the chart has no existingSecret option
+description: |
+  Passwords put into env value fields or ConfigMaps are visible in kubectl
+  describe, in the release manifest and to anyone who can read ConfigMaps.
+remediation: |
+  Render sensitive values into a Secret and reference them with
+  valueFrom.secretKeyRef, and add an existingSecret value.
+query:
+  any:
+    - path: rendered.containers[*]
+      where:
+        path: env[*]
+        where:
+          all:
+            - path: name
+              matches: '(?i)(password|passwd|pwd|secret|token|api_?key|private_?key|access_?key|credentials?)'
+            - path: value
+              exists: true
+            - path: valueFrom
+              exists: false
+    - path: rendered.configmaps[*]
+      where:
+        path: data_keys[*]
+        matches: '(?i)(password|passwd|secret|token|api_?key|private_?key)'
+    - all:
+        - path: values_entries[*]
+          where:
+            path: key
+            matches: '(?i)(password|passwd|token|api_?key|secret)$'
+        - not:
+            path: values_entries[*].key
+            matches: '(?i)^existing'
+---
+id: HELM_RES_001
+title: CPU requests not configured
+severity: WARNING
+category: performance
+target: helm
+resource: helm
+message: The container has no CPU request
+description: |
+  Without a CPU request the scheduler cannot place the pod correctly and the pod
+  gets the lowest CPU share under contention (BestEffort QoS).
+remediation: |
+  Ship default resources.requests.cpu in values.yaml instead of resources: {}.
+query:
+  path: rendered.containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: resources.requests.cpu
+        exists: false
+---
+id: HELM_RES_002
+title: CPU limits not configured
+severity: WARNING
+category: performance
+target: helm
+resource: helm
+message: The container has no CPU limit
+description: |
+  A container without a CPU limit can consume all spare CPU on the node. Note
+  that CPU limits also cause throttling; some teams omit them deliberately.
+remediation: |
+  Ship default resources.limits.cpu in values.yaml, or disable this rule for a
+  requests-only policy.
+query:
+  path: rendered.containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: resources.limits.cpu
+        exists: false
+---
+id: HELM_RES_003
+title: Memory requests not configured
+severity: WARNING
+category: performance
+target: helm
+resource: helm
+message: The container has no memory request
+description: |
+  Pods without memory requests are scheduled onto nodes that cannot hold them
+  and are the first to be evicted under memory pressure.
+remediation: |
+  Ship default resources.requests.memory in values.yaml.
+query:
+  path: rendered.containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: resources.requests.memory
+        exists: false
+---
+id: HELM_RES_004
+title: Memory limits not configured
+severity: WARNING
+category: performance
+target: helm
+resource: helm
+message: The container has no memory limit
+description: |
+  A memory leak in one container can exhaust node memory and get unrelated pods
+  OOM-killed.
+remediation: |
+  Ship default resources.limits.memory in values.yaml.
+query:
+  path: rendered.containers[*]
+  where:
+    all:
+      - path: type
+        in: [container, init, sidecar]
+      - path: resources.limits.memory
+        exists: false
+---
+id: HELM_RES_005
+title: Resource quotas not defined
+severity: WARNING
+category: performance
+target: helm
+resource: helm
+# Many platforms manage quotas centrally; off by default.
+enabled: false
+message: The chart renders no ResourceQuota or LimitRange
+description: |
+  Without a quota or LimitRange, the release can consume unbounded cluster
+  capacity and containers without resources get no defaults.
+remediation: |
+  Add optional templates/resourcequota.yaml and limitrange.yaml guarded by
+  values, or confirm the platform provides them per namespace.
+query:
+  not:
+    path: rendered.resources[*]
+    where:
+      path: kind
+      in: [ResourceQuota, LimitRange]
+---
+id: HELM_REL_001
+title: Readiness probe missing
+severity: WARNING
+category: reliability
+target: helm
+resource: helm
+message: The container has no readiness probe
+description: |
+  Without a readiness probe, traffic is sent to pods as soon as they start and
+  to pods that are temporarily unable to serve.
+remediation: |
+  Template a readinessProbe from values and enable it by default.
+query:
+  path: rendered.containers[*]
+  where:
+    all:
+      - path: type
+        equals: container
+      - path: workload.kind
+        not_in: [Job, CronJob]
+      - path: readinessProbe
+        exists: false
+---
+id: HELM_REL_002
+title: Liveness probe missing
+severity: WARNING
+category: reliability
+target: helm
+resource: helm
+message: The container has no liveness probe
+description: |
+  A deadlocked or hung process keeps running and never gets restarted.
+remediation: |
+  Template a livenessProbe from values and enable it by default; check the
+  process only, not its dependencies.
+query:
+  path: rendered.containers[*]
+  where:
+    all:
+      - path: type
+        equals: container
+      - path: workload.kind
+        not_in: [Job, CronJob]
+      - path: livenessProbe
+        exists: false
+---
+id: HELM_REL_003
+title: Startup probe missing
+severity: WARNING
+category: reliability
+target: helm
+resource: helm
+message: The container has a liveness probe but no startup probe
+description: |
+  Slow-starting applications get killed by the liveness probe before they finish
+  starting, causing restart loops.
+remediation: |
+  Template a startupProbe from values with a generous failureThreshold.
+query:
+  path: rendered.containers[*]
+  where:
+    all:
+      - path: type
+        equals: container
+      - path: workload.kind
+        not_in: [Job, CronJob]
+      - path: livenessProbe
+        exists: true
+      - path: startupProbe
+        exists: false
+---
+id: HELM_REL_004
+title: Pod disruption budget missing
+severity: WARNING
+category: reliability
+target: helm
+resource: helm
+message: A replicated workload has no PodDisruptionBudget
+description: |
+  Node drains during upgrades or autoscaling can evict all replicas at once.
+remediation: |
+  Add a templates/pdb.yaml guarded by podDisruptionBudget.enabled.
+query:
+  path: rendered.workloads[*]
+  where:
+    all:
+      - path: kind
+        in: [Deployment, StatefulSet]
+      - path: has_pdb
+        equals: false
+      - any:
+          - path: spec.replicas
+            gte: 2
+          - path: has_hpa
+            equals: true
+---
+id: HELM_REL_005
+title: High availability configuration missing
+severity: WARNING
+category: reliability
+target: helm
+resource: helm
+message: The workload runs a single replica or its replicas are not spread
+description: |
+  One replica, or several replicas that can all land on the same node or zone,
+  means a single node or zone failure takes the service down.
+remediation: |
+  Default replicaCount to 2+ (or autoscaling.minReplicas) and template
+  topologySpreadConstraints / affinity from values.
+query:
+  path: rendered.workloads[*]
+  where:
+    all:
+      - path: kind
+        in: [Deployment, StatefulSet]
+      - any:
+          - all:
+              - any:
+                  - path: spec.replicas
+                    exists: false
+                  - path: spec.replicas
+                    lt: 2
+              - path: has_hpa
+                equals: false
+          - all:
+              - path: pod.topologySpreadConstraints
+                exists: false
+              - path: pod.affinity.podAntiAffinity
+                exists: false
+---
+id: HELM_REL_006
+title: Replica count not configured
+severity: WARNING
+category: reliability
+target: helm
+resource: helm
+message: replicas is not set and no autoscaler manages the workload
+description: |
+  Without spec.replicas the workload silently runs 1 replica.
+remediation: |
+  Render spec.replicas from .Values.replicaCount, and omit it when
+  autoscaling.enabled is true.
+query:
+  path: rendered.workloads[*]
+  where:
+    all:
+      - path: kind
+        in: [Deployment, StatefulSet, ReplicaSet]
+      - path: spec.replicas
+        exists: false
+      - path: has_hpa
+        equals: false
+---
+id: HELM_REL_007
+title: Rolling update strategy missing
+severity: WARNING
+category: reliability
+target: helm
+resource: helm
+message: The workload is updated with Recreate / OnDelete or an unset strategy
+description: |
+  Recreate stops every pod before starting new ones (downtime on each deploy);
+  OnDelete never rolls out until pods are deleted by hand.
+remediation: |
+  Template strategy / updateStrategy from values with a RollingUpdate default.
+query:
+  path: rendered.workloads[*]
+  where:
+    any:
+      - all:
+          - path: kind
+            equals: Deployment
+          - any:
+              - path: spec.strategy.type
+                equals: Recreate
+              - path: spec.strategy
+                exists: false
+      - all:
+          - path: kind
+            in: [StatefulSet, DaemonSet]
+          - path: spec.updateStrategy.type
+            equals: OnDelete
+---
+id: HELM_REL_008
+title: Graceful termination settings missing
+severity: WARNING
+category: reliability
+target: helm
+resource: helm
+message: The pod has no shutdown grace configuration
+description: |
+  Pods are removed from Service endpoints and sent SIGTERM at about the same
+  time; without a preStop delay or grace period, in-flight requests fail on
+  every deploy and scale-down.
+remediation: |
+  Expose terminationGracePeriodSeconds and lifecycle.preStop in values.yaml with
+  non-zero defaults.
+query:
+  path: rendered.workloads[*]
+  where:
+    all:
+      - path: kind
+        not_in: [Job, CronJob]
+      - any:
+          - path: pod.terminationGracePeriodSeconds
+            equals: 0
+          - all:
+              - path: pod.terminationGracePeriodSeconds
+                exists: false
+              - not:
+                  path: pod.containers[*].lifecycle.preStop
+                  exists: true
+---
+id: HELM_NET_001
+title: Service exposed publicly
+severity: ERROR
+category: security
+target: helm
+resource: helm
+message: A LoadBalancer Service is internet-facing without source restrictions
+description: |
+  An external load balancer with no loadBalancerSourceRanges accepts traffic
+  from the entire internet.
+remediation: |
+  Default service.type to ClusterIP; when LoadBalancer is selected, template
+  loadBalancerSourceRanges and internal LB annotations from values.
+query:
+  path: rendered.services[*]
+  where:
+    all:
+      - path: spec.type
+        equals: LoadBalancer
+      - path: spec.loadBalancerSourceRanges
+        exists: false
+      - not:
+          path: 'metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-internal"]'
+          exists: true
+      - not:
+          path: 'metadata.annotations["service.beta.kubernetes.io/aws-load-balancer-scheme"]'
+          equals: internal
+      - not:
+          path: 'metadata.annotations["networking.gke.io/load-balancer-type"]'
+          equals: Internal
+      - not:
+          path: 'metadata.annotations["cloud.google.com/load-balancer-type"]'
+          equals: Internal
+      - not:
+          path: 'metadata.annotations["service.beta.kubernetes.io/azure-load-balancer-internal"]'
+          equals: "true"
+      - not:
+          path: 'metadata.annotations["service.beta.kubernetes.io/oci-load-balancer-internal"]'
+          equals: "true"
+---
+id: HELM_NET_002
+title: Network policy missing
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: No NetworkPolicy selects the workload's pods
+description: |
+  Pods without a NetworkPolicy accept traffic from every pod in the cluster and
+  can reach every other pod, so one compromised pod can move laterally.
+remediation: |
+  Add a templates/networkpolicy.yaml guarded by networkPolicy.enabled.
+query:
+  path: rendered.workloads[*]
+  where:
+    path: network_policy_selected
+    equals: false
+---
+id: HELM_NET_003
+title: Internal service exposed externally
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: A NodePort, or a database / internal service, is exposed outside the cluster
+description: |
+  NodePort opens the port on every node, and databases, caches or services
+  marked internal should only be reachable from inside the cluster.
+remediation: |
+  Default service.type to ClusterIP and avoid NodePort defaults for databases,
+  caches and internal components.
+query:
+  path: rendered.services[*]
+  where:
+    any:
+      - path: spec.type
+        equals: NodePort
+      - all:
+          - path: spec.type
+            in: [LoadBalancer, NodePort]
+          - any:
+              - path: 'spec.ports[*].port'
+                in: [5432, 3306, 1433, 1521, 27017, 6379, 9200, 9300, 5672, 9042, 11211, 2379, 8086]
+              - path: 'metadata.labels["exposure"]'
+                equals: internal
+---
+id: HELM_NET_004
+title: Ingress TLS not configured
+severity: WARNING
+category: security
+target: helm
+resource: helm
+message: The Ingress serves traffic without TLS or with HTTPS redirect disabled
+description: |
+  Without TLS, credentials and session cookies cross the network in plaintext.
+remediation: |
+  Template ingress.tls from values and document it as required; consider a
+  cert-manager issuer annotation in the example values.
+query:
+  path: rendered.ingresses[*]
+  where:
+    any:
+      - path: spec.tls
+        exists: false
+      - path: 'metadata.annotations["nginx.ingress.kubernetes.io/ssl-redirect"]'
+        equals: "false"
+      - path: 'metadata.annotations["kubernetes.io/ingress.allow-http"]'
+        equals: "true"
+---
+id: HELM_NET_005
+title: Host networking enabled
+severity: ERROR
+category: security
+target: helm
+resource: helm
+message: The pod uses the node's network namespace
+description: |
+  hostNetwork bypasses NetworkPolicies, exposes node-local services such as the
+  kubelet and lets the pod sniff node traffic.
+remediation: |
+  Remove hostNetwork from the template, or gate it behind a value that defaults
+  to false.
+query:
+  path: rendered.workloads[*]
+  where:
+    path: pod.hostNetwork
+    equals: true
+---
+id: HELM_IMG_001
+title: Image uses latest tag
+severity: ERROR
+category: maintainability
+target: helm
+resource: helm
+message: The image uses the latest tag or no tag at all
+description: |
+  latest changes over time, so pods of the same Deployment can run different
+  code and rollbacks do not restore the previous version.
+remediation: |
+  Set image.tag (or default it to .Chart.AppVersion) to an immutable version;
+  never default to latest.
+query:
+  path: rendered.containers[*]
+  where:
+    any:
+      - path: image
+        matches: ':latest(@|$)'
+      - not:
+          path: image
+          matches: '(:[^/:@]+|@sha256:[a-f0-9]{64})$'
+---
+id: HELM_IMG_002
+title: Image tag not pinned
+severity: ERROR
+category: maintainability
+target: helm
+resource: helm
+message: The image uses a floating tag such as a major version or channel name
+description: |
+  Tags like 1, 1.25, stable or alpine are moved to new builds by the publisher,
+  so nodes pulling at different times run different images.
+remediation: |
+  Default image.tag to a full version (1.25.3), not a major / minor or channel
+  tag.
+query:
+  path: rendered.containers[*]
+  where:
+    all:
+      - not:
+          path: image
+          matches: '@sha256:'
+      - path: image
+        matches: ':(stable|lts|edge|main|master|develop|dev|nightly|current|alpine|slim|bookworm|bullseye|jammy|noble|[0-9]+|[0-9]+\.[0-9]+)(-(alpine|slim|bookworm|bullseye))?$'
+---
+id: HELM_IMG_003
+title: Image digest not pinned
+severity: WARNING
+category: maintainability
+target: helm
+resource: helm
+message: The image is referenced by tag only, without a digest
+description: |
+  Tags are mutable; only a digest guarantees that every node runs exactly the
+  image that was tested and scanned.
+remediation: |
+  Add an image.digest value and render image: repo:tag@digest when it is set.
+query:
+  path: rendered.containers[*]
+  where:
+    not:
+      path: image
+      matches: '@sha256:[a-f0-9]{64}$'
+---
+id: HELM_IMG_004
+title: Image pull policy not configured
+severity: WARNING
+category: maintainability
+target: helm
+resource: helm
+message: imagePullPolicy is not set explicitly
+description: |
+  The default depends on the tag (Always for latest, IfNotPresent otherwise),
+  which makes behaviour change when the tag changes.
+remediation: |
+  Render imagePullPolicy from .Values.image.pullPolicy with an explicit default
+  (IfNotPresent).
+query:
+  path: rendered.containers[*]
+  where:
+    path: imagePullPolicy
+    exists: false
+---
+id: HELM_IMG_005
+title: Untrusted registry detected
+severity: WARNING
+category: maintainability
+target: helm
+resource: helm
+# The allow-list is organisation-specific; off by default.
+enabled: false
+message: The image comes from a registry outside the allowed list
+description: |
+  Images from arbitrary registries bypass your scanning, signing and
+  availability controls.
+remediation: |
+  Expose image.registry in values.yaml (and global.imageRegistry) defaulting to
+  an approved registry.
+query:
+  path: rendered.containers[*]
+  where:
+    not:
+      path: image
+      matches: '^((docker\.io/)?(library/)?[a-z0-9._-]+(:|@|$)|registry\.k8s\.io/|quay\.io/(prometheus|jetstack)/|gcr\.io/distroless/|cgr\.dev/chainguard/|mcr\.microsoft\.com/|registry\.example\.com/|ghcr\.io/example-org/)'
+---
+id: HELM_PROD_001
+title: Monitoring annotations missing
+severity: WARNING
+category: operational
+target: helm
+resource: helm
+message: The workload is neither annotated for scraping nor selected by a ServiceMonitor
+description: |
+  Metrics from the workload are not collected, so dashboards and alerts have no
+  data for it.
+remediation: |
+  Add a templates/servicemonitor.yaml guarded by metrics.serviceMonitor.enabled,
+  or template prometheus.io annotations from podAnnotations.
+query:
+  path: rendered.workloads[*]
+  where:
+    all:
+      - path: kind
+        not_in: [Job, CronJob]
+      - not:
+          path: 'pod_metadata.annotations["prometheus.io/scrape"]'
+          equals: "true"
+      - path: monitor_selected
+        equals: false
+---
+id: HELM_PROD_002
+title: Logging integration not detected
+severity: WARNING
+category: operational
+target: helm
+resource: helm
+# Depends on cluster-level tooling; off by default.
+enabled: false
+message: No log collection agent is deployed in the manifests
+description: |
+  Container logs live on the node only until rotation or pod deletion; without a
+  collector they are lost when they are needed for an incident.
+remediation: |
+  Confirm the cluster runs a log collector, or disable this rule for app charts.
+query:
+  not:
+    path: rendered.workloads[*]
+    where:
+      all:
+        - path: kind
+          equals: DaemonSet
+        - path: 'pod.containers[*].image'
+          matches: '(fluent-bit|fluentbit|fluentd|vector|promtail|grafana/alloy|filebeat|elastic-agent|datadog/agent|splunk|otel/opentelemetry-collector|opentelemetry-collector)'
+---
+id: HELM_PROD_003
+title: Backup strategy not detected
+severity: WARNING
+category: operational
+target: helm
+resource: helm
+# Depends on cluster-level backup tooling; off by default.
+enabled: false
+message: Persistent data exists but no backup schedule is defined
+description: |
+  PersistentVolumes are not backed up by Kubernetes; losing the volume or the
+  cluster loses the data.
+remediation: |
+  For stateful charts, ship a backup option (a Velero Schedule or backup CronJob
+  guarded by backup.enabled).
+query:
+  all:
+    - any:
+        - path: rendered.resources[*]
+          where:
+            path: kind
+            equals: PersistentVolumeClaim
+        - path: rendered.workloads[*]
+          where:
+            path: spec.volumeClaimTemplates
+            exists: true
+    - not:
+        path: rendered.resources[*]
+        where:
+          any:
+            - all:
+                - path: kind
+                  equals: Schedule
+                - path: apiVersion
+                  matches: '^(velero\.io|k8up\.io)/'
+            - path: kind
+              in: [VolumeSnapshotSchedule, SnapshotSchedule, BackupSchedule, Policy]
+---
+id: HELM_PROD_004
+title: Alerting integration not detected
+severity: WARNING
+category: operational
+target: helm
+resource: helm
+# Depends on cluster-level alerting resources; off by default.
+enabled: false
+message: No alerting rules or Alertmanager configuration are defined
+description: |
+  Without alert rules, failures are discovered by users rather than by the team.
+remediation: |
+  Add a templates/prometheusrule.yaml guarded by metrics.prometheusRule.enabled.
+query:
+  not:
+    path: rendered.resources[*]
+    where:
+      path: kind
+      in: [PrometheusRule, AlertmanagerConfig, VMRule, Alert]
+---
+id: HELM_PROD_005
+title: Ownership metadata missing
+severity: WARNING
+category: operational
+target: helm
+resource: helm
+message: Chart.yaml has no maintainers, or rendered workloads lack name / owner labels
+description: |
+  Without maintainers in Chart.yaml and ownership labels on the rendered
+  objects, nobody can tell who owns the chart or a failing workload.
+remediation: |
+  Add maintainers to Chart.yaml and render the standard app.kubernetes.io/*
+  labels plus an owner / team label from a shared _helpers.tpl labels template.
+query:
+  any:
+    - path: chart.maintainers
+      exists: false
+    - path: rendered.workloads[*]
+      where:
+        any:
+          - path: 'metadata.labels["app.kubernetes.io/name"]'
+            exists: false
+          - all:
+              - path: 'metadata.labels["team"]'
+                exists: false
+              - path: 'metadata.labels["owner"]'
+                exists: false
+              - path: 'metadata.annotations["owner"]'
+                exists: false
