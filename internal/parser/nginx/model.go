@@ -581,10 +581,12 @@ func buildContext(file string) map[string]any {
 		c["files"] = files
 	}
 
-	for _, p := range []string{"/etc/logrotate.d/nginx", "/etc/logrotate.d/nginx-common"} {
-		if _, err := os.Stat(p); err == nil {
-			c["logrotate"] = p
-			break
+	if strings.HasPrefix(dir, "/etc/") || dir == "/etc" {
+		for _, p := range []string{"/etc/logrotate.d/nginx", "/etc/logrotate.d/nginx-common"} {
+			if _, err := os.Stat(p); err == nil {
+				c["logrotate"] = p
+				break
+			}
 		}
 	}
 	return c
