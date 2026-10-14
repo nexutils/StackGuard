@@ -1,0 +1,25 @@
+---
+- name: Web servers
+  hosts: web
+  become: true
+  pre_tasks:
+    - name: Update cache
+      ansible.builtin.apt:
+        update_cache: true
+  tasks:
+    - name: Group
+      block:
+        - name: Install
+          apt:
+            name: nginx
+        - ansible.builtin.command: /bin/true
+      rescue:
+        - name: Report
+          debug:
+            msg: failed
+  handlers:
+    - name: restart nginx
+      service:
+        name: nginx
+        state: restarted
+- import_playbook: other.yml

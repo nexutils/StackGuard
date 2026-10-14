@@ -1,0 +1,393 @@
+[
+  {
+    "target": "github",
+    "type": "github",
+    "name": "ci.yml",
+    "file": "github/.github/workflows/ci.yml",
+    "line": 1,
+    "properties": {
+      "jobs": [
+        {
+          "action": {
+            "kind": "repo",
+            "owner": "acme",
+            "path": ".github/workflows/build.yml",
+            "ref": "main",
+            "ref_is_sha": false,
+            "repo": "shared"
+          },
+          "id": "call",
+          "is_deploy": false,
+          "uses": "acme/shared/.github/workflows/build.yml@main",
+          "workflow": {
+            "file": "github/.github/workflows/ci.yml",
+            "permissions": {
+              "contents": "read"
+            },
+            "triggers": [
+              "pull_request",
+              "push"
+            ]
+          }
+        },
+        {
+          "id": "test",
+          "is_deploy": false,
+          "runs_on": "ubuntu-latest",
+          "steps": [
+            {
+              "action": {
+                "kind": "repo",
+                "owner": "actions",
+                "ref": "v4",
+                "ref_is_sha": false,
+                "repo": "checkout"
+              },
+              "job": {
+                "id": "test",
+                "is_deploy": false,
+                "runs_on": "ubuntu-latest"
+              },
+              "uses": "actions/checkout@v4",
+              "workflow": {
+                "file": "github/.github/workflows/ci.yml",
+                "permissions": {
+                  "contents": "read"
+                },
+                "triggers": [
+                  "pull_request",
+                  "push"
+                ]
+              }
+            },
+            {
+              "action": {
+                "kind": "local",
+                "path": "./.github/actions/setup"
+              },
+              "job": {
+                "id": "test",
+                "is_deploy": false,
+                "runs_on": "ubuntu-latest"
+              },
+              "name": "Local action",
+              "uses": "./.github/actions/setup",
+              "workflow": {
+                "file": "github/.github/workflows/ci.yml",
+                "permissions": {
+                  "contents": "read"
+                },
+                "triggers": [
+                  "pull_request",
+                  "push"
+                ]
+              }
+            },
+            {
+              "action": {
+                "kind": "docker"
+              },
+              "job": {
+                "id": "test",
+                "is_deploy": false,
+                "runs_on": "ubuntu-latest"
+              },
+              "uses": "docker://alpine:3.19",
+              "workflow": {
+                "file": "github/.github/workflows/ci.yml",
+                "permissions": {
+                  "contents": "read"
+                },
+                "triggers": [
+                  "pull_request",
+                  "push"
+                ]
+              }
+            },
+            {
+              "job": {
+                "id": "test",
+                "is_deploy": false,
+                "runs_on": "ubuntu-latest"
+              },
+              "run": "make test",
+              "workflow": {
+                "file": "github/.github/workflows/ci.yml",
+                "permissions": {
+                  "contents": "read"
+                },
+                "triggers": [
+                  "pull_request",
+                  "push"
+                ]
+              }
+            }
+          ],
+          "timeout_minutes": 10,
+          "workflow": {
+            "file": "github/.github/workflows/ci.yml",
+            "permissions": {
+              "contents": "read"
+            },
+            "triggers": [
+              "pull_request",
+              "push"
+            ]
+          }
+        }
+      ],
+      "steps": [
+        {
+          "action": {
+            "kind": "repo",
+            "owner": "actions",
+            "ref": "v4",
+            "ref_is_sha": false,
+            "repo": "checkout"
+          },
+          "job": {
+            "id": "test",
+            "is_deploy": false,
+            "runs_on": "ubuntu-latest"
+          },
+          "uses": "actions/checkout@v4",
+          "workflow": {
+            "file": "github/.github/workflows/ci.yml",
+            "permissions": {
+              "contents": "read"
+            },
+            "triggers": [
+              "pull_request",
+              "push"
+            ]
+          }
+        },
+        {
+          "action": {
+            "kind": "local",
+            "path": "./.github/actions/setup"
+          },
+          "job": {
+            "id": "test",
+            "is_deploy": false,
+            "runs_on": "ubuntu-latest"
+          },
+          "name": "Local action",
+          "uses": "./.github/actions/setup",
+          "workflow": {
+            "file": "github/.github/workflows/ci.yml",
+            "permissions": {
+              "contents": "read"
+            },
+            "triggers": [
+              "pull_request",
+              "push"
+            ]
+          }
+        },
+        {
+          "action": {
+            "kind": "docker"
+          },
+          "job": {
+            "id": "test",
+            "is_deploy": false,
+            "runs_on": "ubuntu-latest"
+          },
+          "uses": "docker://alpine:3.19",
+          "workflow": {
+            "file": "github/.github/workflows/ci.yml",
+            "permissions": {
+              "contents": "read"
+            },
+            "triggers": [
+              "pull_request",
+              "push"
+            ]
+          }
+        },
+        {
+          "job": {
+            "id": "test",
+            "is_deploy": false,
+            "runs_on": "ubuntu-latest"
+          },
+          "run": "make test",
+          "workflow": {
+            "file": "github/.github/workflows/ci.yml",
+            "permissions": {
+              "contents": "read"
+            },
+            "triggers": [
+              "pull_request",
+              "push"
+            ]
+          }
+        }
+      ],
+      "strings": [
+        "acme/shared/.github/workflows/build.yml@main",
+        "ubuntu-latest",
+        "actions/checkout@v4",
+        "Local action",
+        "./.github/actions/setup",
+        "docker://alpine:3.19",
+        "make test",
+        "CI",
+        "main",
+        "read"
+      ],
+      "workflows": [
+        {
+          "file": "github/.github/workflows/ci.yml",
+          "jobs": [
+            {
+              "action": {
+                "kind": "repo",
+                "owner": "acme",
+                "path": ".github/workflows/build.yml",
+                "ref": "main",
+                "ref_is_sha": false,
+                "repo": "shared"
+              },
+              "id": "call",
+              "is_deploy": false,
+              "uses": "acme/shared/.github/workflows/build.yml@main",
+              "workflow": {
+                "file": "github/.github/workflows/ci.yml",
+                "permissions": {
+                  "contents": "read"
+                },
+                "triggers": [
+                  "pull_request",
+                  "push"
+                ]
+              }
+            },
+            {
+              "id": "test",
+              "is_deploy": false,
+              "runs_on": "ubuntu-latest",
+              "steps": [
+                {
+                  "action": {
+                    "kind": "repo",
+                    "owner": "actions",
+                    "ref": "v4",
+                    "ref_is_sha": false,
+                    "repo": "checkout"
+                  },
+                  "job": {
+                    "id": "test",
+                    "is_deploy": false,
+                    "runs_on": "ubuntu-latest"
+                  },
+                  "uses": "actions/checkout@v4",
+                  "workflow": {
+                    "file": "github/.github/workflows/ci.yml",
+                    "permissions": {
+                      "contents": "read"
+                    },
+                    "triggers": [
+                      "pull_request",
+                      "push"
+                    ]
+                  }
+                },
+                {
+                  "action": {
+                    "kind": "local",
+                    "path": "./.github/actions/setup"
+                  },
+                  "job": {
+                    "id": "test",
+                    "is_deploy": false,
+                    "runs_on": "ubuntu-latest"
+                  },
+                  "name": "Local action",
+                  "uses": "./.github/actions/setup",
+                  "workflow": {
+                    "file": "github/.github/workflows/ci.yml",
+                    "permissions": {
+                      "contents": "read"
+                    },
+                    "triggers": [
+                      "pull_request",
+                      "push"
+                    ]
+                  }
+                },
+                {
+                  "action": {
+                    "kind": "docker"
+                  },
+                  "job": {
+                    "id": "test",
+                    "is_deploy": false,
+                    "runs_on": "ubuntu-latest"
+                  },
+                  "uses": "docker://alpine:3.19",
+                  "workflow": {
+                    "file": "github/.github/workflows/ci.yml",
+                    "permissions": {
+                      "contents": "read"
+                    },
+                    "triggers": [
+                      "pull_request",
+                      "push"
+                    ]
+                  }
+                },
+                {
+                  "job": {
+                    "id": "test",
+                    "is_deploy": false,
+                    "runs_on": "ubuntu-latest"
+                  },
+                  "run": "make test",
+                  "workflow": {
+                    "file": "github/.github/workflows/ci.yml",
+                    "permissions": {
+                      "contents": "read"
+                    },
+                    "triggers": [
+                      "pull_request",
+                      "push"
+                    ]
+                  }
+                }
+              ],
+              "timeout_minutes": 10,
+              "workflow": {
+                "file": "github/.github/workflows/ci.yml",
+                "permissions": {
+                  "contents": "read"
+                },
+                "triggers": [
+                  "pull_request",
+                  "push"
+                ]
+              }
+            }
+          ],
+          "name": "CI",
+          "on": {
+            "pull_request": null,
+            "push": {
+              "branches": [
+                "main"
+              ]
+            }
+          },
+          "permissions": {
+            "contents": "read"
+          },
+          "triggers": [
+            "pull_request",
+            "push"
+          ]
+        }
+      ]
+    }
+  }
+]

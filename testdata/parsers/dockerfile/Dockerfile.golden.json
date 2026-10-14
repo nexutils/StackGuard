@@ -1,0 +1,369 @@
+[
+  {
+    "target": "dockerfile",
+    "type": "dockerfile",
+    "name": "Dockerfile",
+    "file": "dockerfile/Dockerfile",
+    "line": 3,
+    "properties": {
+      "all": {
+        "arg": [
+          "GO_VERSION=1.22"
+        ],
+        "copy": [
+          {
+            "cmd": "COPY",
+            "dest": "/app",
+            "from": "build",
+            "remote": false,
+            "src": [
+              "/out/app"
+            ]
+          }
+        ],
+        "env": [
+          "CGO_ENABLED=0",
+          "GOOS=linux",
+          "LEGACY=value with spaces"
+        ],
+        "run": [
+          "\u003c\u003cEOF\ngo mod download\ngo build -o /out/app ./cmd/app",
+          "go test ./..."
+        ]
+      },
+      "directives": {
+        "syntax": "docker/dockerfile:1"
+      },
+      "final": {
+        "base": "gcr.io/distroless/static:nonroot@sha256:deadbeef",
+        "base_stage": false,
+        "copy": [
+          {
+            "cmd": "COPY",
+            "dest": "/app",
+            "from": "build",
+            "remote": false,
+            "src": [
+              "/out/app"
+            ]
+          }
+        ],
+        "entrypoint": {
+          "form": "exec",
+          "value": "/app"
+        },
+        "expose": [
+          "8080/tcp",
+          "9090/udp"
+        ],
+        "healthcheck": {
+          "interval": "30s",
+          "value": "/app health"
+        },
+        "index": 2,
+        "instructions": {
+          "10": {
+            "args": "--from=build /out/app /app",
+            "cmd": "COPY",
+            "index": 10
+          },
+          "11": {
+            "args": "8080 9090/udp",
+            "cmd": "EXPOSE",
+            "index": 11
+          },
+          "12": {
+            "args": "nonroot:nonroot",
+            "cmd": "USER",
+            "index": 12
+          },
+          "13": {
+            "args": "--interval=30s CMD [\"/app\", \"health\"]",
+            "cmd": "HEALTHCHECK",
+            "index": 13
+          },
+          "14": {
+            "args": "[\"/app\"]",
+            "cmd": "ENTRYPOINT",
+            "index": 14
+          }
+        },
+        "layer_count": 1,
+        "max_consecutive_run": 0,
+        "user": "nonroot:nonroot"
+      },
+      "stages": [
+        {
+          "base": "golang:${GO_VERSION}",
+          "base_stage": false,
+          "env": [
+            "CGO_ENABLED=0",
+            "GOOS=linux",
+            "LEGACY=value with spaces"
+          ],
+          "index": 0,
+          "instructions": {
+            "3": {
+              "args": "/src",
+              "cmd": "WORKDIR",
+              "index": 3
+            },
+            "4": {
+              "args": "CGO_ENABLED=0 GOOS=linux",
+              "cmd": "ENV",
+              "index": 4
+            },
+            "5": {
+              "args": "LEGACY value with spaces",
+              "cmd": "ENV",
+              "index": 5
+            },
+            "6": {
+              "args": "\u003c\u003cEOF\ngo mod download\ngo build -o /out/app ./cmd/app",
+              "cmd": "RUN",
+              "index": 6
+            }
+          },
+          "layer_count": 1,
+          "max_consecutive_run": 1,
+          "name": "build",
+          "platform": "$BUILDPLATFORM",
+          "run": [
+            "\u003c\u003cEOF\ngo mod download\ngo build -o /out/app ./cmd/app"
+          ]
+        },
+        {
+          "base": "build",
+          "base_stage": true,
+          "index": 1,
+          "instructions": {
+            "8": {
+              "args": "go test ./...",
+              "cmd": "RUN",
+              "index": 8
+            }
+          },
+          "layer_count": 1,
+          "max_consecutive_run": 1,
+          "name": "test",
+          "run": [
+            "go test ./..."
+          ]
+        },
+        {
+          "base": "gcr.io/distroless/static:nonroot@sha256:deadbeef",
+          "base_stage": false,
+          "copy": [
+            {
+              "cmd": "COPY",
+              "dest": "/app",
+              "from": "build",
+              "remote": false,
+              "src": [
+                "/out/app"
+              ]
+            }
+          ],
+          "entrypoint": {
+            "form": "exec",
+            "value": "/app"
+          },
+          "expose": [
+            "8080/tcp",
+            "9090/udp"
+          ],
+          "healthcheck": {
+            "interval": "30s",
+            "value": "/app health"
+          },
+          "index": 2,
+          "instructions": {
+            "10": {
+              "args": "--from=build /out/app /app",
+              "cmd": "COPY",
+              "index": 10
+            },
+            "11": {
+              "args": "8080 9090/udp",
+              "cmd": "EXPOSE",
+              "index": 11
+            },
+            "12": {
+              "args": "nonroot:nonroot",
+              "cmd": "USER",
+              "index": 12
+            },
+            "13": {
+              "args": "--interval=30s CMD [\"/app\", \"health\"]",
+              "cmd": "HEALTHCHECK",
+              "index": 13
+            },
+            "14": {
+              "args": "[\"/app\"]",
+              "cmd": "ENTRYPOINT",
+              "index": 14
+            }
+          },
+          "layer_count": 1,
+          "max_consecutive_run": 0,
+          "user": "nonroot:nonroot"
+        }
+      ]
+    },
+    "locations": {
+      "all.arg.0": {
+        "line": 2
+      },
+      "all.copy.0": {
+        "line": 16
+      },
+      "all.env.0": {
+        "line": 5
+      },
+      "all.env.1": {
+        "line": 5
+      },
+      "all.env.2": {
+        "line": 6
+      },
+      "all.run.0": {
+        "line": 7
+      },
+      "all.run.1": {
+        "line": 13
+      },
+      "final": {
+        "line": 15
+      },
+      "final.base": {
+        "line": 15
+      },
+      "final.copy.0": {
+        "line": 16
+      },
+      "final.entrypoint": {
+        "line": 21
+      },
+      "final.entrypoint.value": {
+        "line": 21
+      },
+      "final.expose.0": {
+        "line": 17
+      },
+      "final.expose.1": {
+        "line": 17
+      },
+      "final.healthcheck": {
+        "line": 19
+      },
+      "final.healthcheck.value": {
+        "line": 19
+      },
+      "final.instructions.10": {
+        "line": 16
+      },
+      "final.instructions.11": {
+        "line": 17
+      },
+      "final.instructions.12": {
+        "line": 18
+      },
+      "final.instructions.13": {
+        "line": 19
+      },
+      "final.instructions.14": {
+        "line": 21
+      },
+      "final.user": {
+        "line": 18
+      },
+      "stages.0": {
+        "line": 3
+      },
+      "stages.0.base": {
+        "line": 3
+      },
+      "stages.0.env.0": {
+        "line": 5
+      },
+      "stages.0.env.1": {
+        "line": 5
+      },
+      "stages.0.env.2": {
+        "line": 6
+      },
+      "stages.0.instructions.3": {
+        "line": 4
+      },
+      "stages.0.instructions.4": {
+        "line": 5
+      },
+      "stages.0.instructions.5": {
+        "line": 6
+      },
+      "stages.0.instructions.6": {
+        "line": 7
+      },
+      "stages.0.run.0": {
+        "line": 7
+      },
+      "stages.1": {
+        "line": 12
+      },
+      "stages.1.base": {
+        "line": 12
+      },
+      "stages.1.instructions.8": {
+        "line": 13
+      },
+      "stages.1.run.0": {
+        "line": 13
+      },
+      "stages.2": {
+        "line": 15
+      },
+      "stages.2.base": {
+        "line": 15
+      },
+      "stages.2.copy.0": {
+        "line": 16
+      },
+      "stages.2.entrypoint": {
+        "line": 21
+      },
+      "stages.2.entrypoint.value": {
+        "line": 21
+      },
+      "stages.2.expose.0": {
+        "line": 17
+      },
+      "stages.2.expose.1": {
+        "line": 17
+      },
+      "stages.2.healthcheck": {
+        "line": 19
+      },
+      "stages.2.healthcheck.value": {
+        "line": 19
+      },
+      "stages.2.instructions.10": {
+        "line": 16
+      },
+      "stages.2.instructions.11": {
+        "line": 17
+      },
+      "stages.2.instructions.12": {
+        "line": 18
+      },
+      "stages.2.instructions.13": {
+        "line": 19
+      },
+      "stages.2.instructions.14": {
+        "line": 21
+      },
+      "stages.2.user": {
+        "line": 18
+      }
+    }
+  }
+]

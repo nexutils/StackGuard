@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "StackGuard",
+          "version": "1.2.3",
+          "informationUri": "https://github.com/nexutils/StackGuard",
+          "rules": [
+            {
+              "id": "COMP_OPS_001",
+              "name": "MissingMemoryLimit",
+              "shortDescription": {
+                "text": "Missing memory limit"
+              },
+              "fullDescription": {
+                "text": "Missing memory limit"
+              },
+              "help": {
+                "text": "Missing memory limit",
+                "markdown": "**Missing memory limit**\n\nMissing memory limit"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "operational",
+                  "compose"
+                ]
+              }
+            },
+            {
+              "id": "COMP_MNT_001",
+              "name": "UnpinnedImageVersion",
+              "shortDescription": {
+                "text": "Unpinned image version"
+              },
+              "fullDescription": {
+                "text": "Unpinned image version"
+              },
+              "help": {
+                "text": "Unpinned image version",
+                "markdown": "**Unpinned image version**\n\nUnpinned image version"
+              },
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "tags": [
+                  "maintainability",
+                  "compose"
+                ]
+              }
+            },
+            {
+              "id": "COMP_SEC_001",
+              "name": "PrivilegedContainer",
+              "shortDescription": {
+                "text": "Privileged container"
+              },
+              "fullDescription": {
+                "text": "Privileged containers can take over the host."
+              },
+              "help": {
+                "text": "Privileged containers can take over the host.\n\nRemediation: Remove `privileged: true`.",
+                "markdown": "**Privileged container**\n\nPrivileged containers can take over the host.\n\n**Remediation**\n\nRemove `privileged: true`."
+              },
+              "helpUri": "https://docs.docker.com/reference/compose-file/services/#privileged",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "compose",
+                  "cis-docker-5.4",
+                  "security"
+                ],
+                "security-severity": "8.0"
+              }
+            },
+            {
+              "id": "TF_SEC_001",
+              "name": "PublicS3BucketACL",
+              "shortDescription": {
+                "text": "Public S3 bucket ACL"
+              },
+              "fullDescription": {
+                "text": "Public S3 bucket ACL"
+              },
+              "help": {
+                "text": "Public S3 bucket ACL",
+                "markdown": "**Public S3 bucket ACL**\n\nPublic S3 bucket ACL"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "tags": [
+                  "security",
+                  "terraform",
+                  "security"
+                ],
+                "security-severity": "8.0"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "COMP_SEC_001",
+          "ruleIndex": 2,
+          "level": "error",
+          "message": {
+            "text": "Service 'api' runs in privileged mode \u003cb\u003e"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docker-compose.yml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 4,
+                  "startColumn": 5
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "stackguard/v1": "aaaa"
+          }
+        },
+        {
+          "ruleId": "COMP_OPS_001",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": {
+            "text": "Service 'redis' has no memory limit"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "docker-compose.yml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 9
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "stackguard/v1": "bbbb"
+          }
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ]
+    }
+  ]
+}

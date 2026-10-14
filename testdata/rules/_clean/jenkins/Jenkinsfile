@@ -1,0 +1,33 @@
+pipeline {
+    agent { label 'linux' }
+    options {
+        timeout(time: 60, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '50', daysToKeepStr: '90', artifactNumToKeepStr: '10', artifactDaysToKeepStr: '30'))
+    }
+    stages {
+        stage('Build') {
+            steps {
+                sh 'mvn -B package'
+                archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'mvn -B test'
+            }
+            post {
+                always {
+                    junit 'target/surefire-reports/*.xml'
+                }
+            }
+        }
+    }
+    post {
+        failure {
+            slackSend message: 'Build failed'
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

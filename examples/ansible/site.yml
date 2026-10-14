@@ -1,0 +1,15 @@
+- name: Provision app servers
+  hosts: app
+  become: true
+  tasks:
+    - name: Create deploy user
+      ansible.builtin.user:
+        name: deploy
+        password: "{{ deploy_password | password_hash('sha512') }}"
+    - name: Fetch agent
+      ansible.builtin.get_url:
+        url: https://example.com/agent.tar.gz
+        dest: /tmp/agent.tar.gz
+        validate_certs: false
+    - name: Restart app
+      ansible.builtin.shell: systemctl restart app

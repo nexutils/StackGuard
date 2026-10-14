@@ -1,0 +1,30 @@
+x-common: &common
+  restart: unless-stopped
+  environment:
+    TZ: UTC
+
+services:
+  web:
+    <<: *common
+    image: registry.example.com:5000/acme/web:2.1@sha256:abc123
+    ports:
+      - "80"
+      - "8080:80"
+      - "127.0.0.1:8443:443/tcp"
+      - "[::1]:9000:9000"
+      - target: 5432
+        published: "5432"
+        protocol: tcp
+    environment:
+      - LOG_LEVEL=debug
+      - EMPTY
+  worker:
+    image: acme/worker
+    command: ["worker", "--queue", "default"]
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  data: {}

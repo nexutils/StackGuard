@@ -1,0 +1,355 @@
+[
+  {
+    "target": "compose",
+    "type": "service",
+    "name": "web",
+    "file": "compose/docker-compose.yml",
+    "line": 7,
+    "properties": {
+      "_image": {
+        "digest": "sha256:abc123",
+        "name": "registry.example.com:5000/acme/web",
+        "tag": "2.1"
+      },
+      "_services": [
+        "web",
+        "worker"
+      ],
+      "environment": [
+        "LOG_LEVEL=debug",
+        "EMPTY"
+      ],
+      "image": "registry.example.com:5000/acme/web:2.1@sha256:abc123",
+      "ports": [
+        "::80/tcp",
+        ":8080:80/tcp",
+        "127.0.0.1:8443:443/tcp",
+        "[::1]:9000:9000/tcp",
+        ":5432:5432/tcp"
+      ],
+      "restart": "unless-stopped"
+    },
+    "locations": {
+      "_image": {
+        "line": 9,
+        "column": 5
+      },
+      "environment": {
+        "line": 18,
+        "column": 5
+      },
+      "environment.0": {
+        "line": 19,
+        "column": 9
+      },
+      "environment.1": {
+        "line": 20,
+        "column": 9
+      },
+      "environment.TZ": {
+        "line": 4,
+        "column": 5
+      },
+      "image": {
+        "line": 9,
+        "column": 5
+      },
+      "ports": {
+        "line": 10,
+        "column": 5
+      },
+      "ports.0": {
+        "line": 11,
+        "column": 9
+      },
+      "ports.1": {
+        "line": 12,
+        "column": 9
+      },
+      "ports.2": {
+        "line": 13,
+        "column": 9
+      },
+      "ports.3": {
+        "line": 14,
+        "column": 9
+      },
+      "ports.4": {
+        "line": 15,
+        "column": 9
+      },
+      "ports.4.protocol": {
+        "line": 17,
+        "column": 9
+      },
+      "ports.4.published": {
+        "line": 16,
+        "column": 9
+      },
+      "ports.4.target": {
+        "line": 15,
+        "column": 9
+      },
+      "restart": {
+        "line": 2,
+        "column": 3
+      }
+    }
+  },
+  {
+    "target": "compose",
+    "type": "service",
+    "name": "worker",
+    "file": "compose/docker-compose.yml",
+    "line": 21,
+    "properties": {
+      "_image": {
+        "name": "acme/worker"
+      },
+      "_services": [
+        "web",
+        "worker"
+      ],
+      "command": "worker --queue default",
+      "environment": null,
+      "image": "acme/worker"
+    },
+    "locations": {
+      "_image": {
+        "line": 22,
+        "column": 5
+      },
+      "command": {
+        "line": 23,
+        "column": 5
+      },
+      "command.0": {
+        "line": 23,
+        "column": 15
+      },
+      "command.1": {
+        "line": 23,
+        "column": 25
+      },
+      "command.2": {
+        "line": 23,
+        "column": 36
+      },
+      "image": {
+        "line": 22,
+        "column": 5
+      }
+    }
+  },
+  {
+    "target": "compose",
+    "type": "network",
+    "name": "backend",
+    "file": "compose/docker-compose.yml",
+    "line": 26,
+    "properties": {
+      "driver": "bridge"
+    },
+    "locations": {
+      "driver": {
+        "line": 27,
+        "column": 5
+      }
+    }
+  },
+  {
+    "target": "compose",
+    "type": "volume",
+    "name": "data",
+    "file": "compose/docker-compose.yml",
+    "line": 30,
+    "properties": {}
+  },
+  {
+    "target": "compose",
+    "type": "project",
+    "name": "compose",
+    "file": "compose/docker-compose.yml",
+    "line": 1,
+    "properties": {
+      "_index": {
+        "volume_mounts": {},
+        "volume_writers": {}
+      },
+      "networks": {
+        "backend": {
+          "driver": "bridge"
+        }
+      },
+      "services": {
+        "web": {
+          "_image": {
+            "digest": "sha256:abc123",
+            "name": "registry.example.com:5000/acme/web",
+            "tag": "2.1"
+          },
+          "environment": [
+            "LOG_LEVEL=debug",
+            "EMPTY"
+          ],
+          "image": "registry.example.com:5000/acme/web:2.1@sha256:abc123",
+          "ports": [
+            "::80/tcp",
+            ":8080:80/tcp",
+            "127.0.0.1:8443:443/tcp",
+            "[::1]:9000:9000/tcp",
+            ":5432:5432/tcp"
+          ],
+          "restart": "unless-stopped"
+        },
+        "worker": {
+          "_image": {
+            "name": "acme/worker"
+          },
+          "command": "worker --queue default",
+          "environment": null,
+          "image": "acme/worker"
+        }
+      },
+      "volumes": {
+        "data": {}
+      },
+      "x-common": {
+        "environment": {
+          "TZ": "UTC"
+        },
+        "restart": "unless-stopped"
+      }
+    },
+    "locations": {
+      "networks": {
+        "line": 25,
+        "column": 1
+      },
+      "networks.backend": {
+        "line": 26,
+        "column": 3
+      },
+      "networks.backend.driver": {
+        "line": 27,
+        "column": 5
+      },
+      "services": {
+        "line": 6,
+        "column": 1
+      },
+      "services.web": {
+        "line": 7,
+        "column": 3
+      },
+      "services.web.environment": {
+        "line": 18,
+        "column": 5
+      },
+      "services.web.environment.0": {
+        "line": 19,
+        "column": 9
+      },
+      "services.web.environment.1": {
+        "line": 20,
+        "column": 9
+      },
+      "services.web.environment.TZ": {
+        "line": 4,
+        "column": 5
+      },
+      "services.web.image": {
+        "line": 9,
+        "column": 5
+      },
+      "services.web.ports": {
+        "line": 10,
+        "column": 5
+      },
+      "services.web.ports.0": {
+        "line": 11,
+        "column": 9
+      },
+      "services.web.ports.1": {
+        "line": 12,
+        "column": 9
+      },
+      "services.web.ports.2": {
+        "line": 13,
+        "column": 9
+      },
+      "services.web.ports.3": {
+        "line": 14,
+        "column": 9
+      },
+      "services.web.ports.4": {
+        "line": 15,
+        "column": 9
+      },
+      "services.web.ports.4.protocol": {
+        "line": 17,
+        "column": 9
+      },
+      "services.web.ports.4.published": {
+        "line": 16,
+        "column": 9
+      },
+      "services.web.ports.4.target": {
+        "line": 15,
+        "column": 9
+      },
+      "services.web.restart": {
+        "line": 2,
+        "column": 3
+      },
+      "services.worker": {
+        "line": 21,
+        "column": 3
+      },
+      "services.worker.command": {
+        "line": 23,
+        "column": 5
+      },
+      "services.worker.command.0": {
+        "line": 23,
+        "column": 15
+      },
+      "services.worker.command.1": {
+        "line": 23,
+        "column": 25
+      },
+      "services.worker.command.2": {
+        "line": 23,
+        "column": 36
+      },
+      "services.worker.image": {
+        "line": 22,
+        "column": 5
+      },
+      "volumes": {
+        "line": 29,
+        "column": 1
+      },
+      "volumes.data": {
+        "line": 30,
+        "column": 3
+      },
+      "x-common": {
+        "line": 1,
+        "column": 1
+      },
+      "x-common.environment": {
+        "line": 3,
+        "column": 3
+      },
+      "x-common.environment.TZ": {
+        "line": 4,
+        "column": 5
+      },
+      "x-common.restart": {
+        "line": 2,
+        "column": 3
+      }
+    }
+  }
+]

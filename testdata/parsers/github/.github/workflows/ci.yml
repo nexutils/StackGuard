@@ -1,0 +1,19 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Local action
+        uses: ./.github/actions/setup
+      - uses: docker://alpine:3.19
+      - run: make test
+  call:
+    uses: acme/shared/.github/workflows/build.yml@main

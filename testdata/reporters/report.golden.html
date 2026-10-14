@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StackGuard Report</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --border: #e3e3de;
+    --error: #c62828; --warning: #b26a00; --info: #1565c0; --good: #2e7d32;
+    --error-bg: #fdecec; --warning-bg: #fff4e0; --info-bg: #e8f1fc; --good-bg: #e9f5ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151514; --panel: #1e1e1c; --text: #ecece8; --muted: #9a9a94; --border: #33332f;
+      --error: #ef6b6b; --warning: #f0a93b; --info: #6aa8f0; --good: #6cc070;
+      --error-bg: #3a1f1f; --warning-bg: #3a2c14; --info-bg: #1b2a3d; --good-bg: #1d301e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; margin-bottom: 24px; }
+  h1 { font-size: 22px; margin: 0; }
+  .muted { color: var(--muted); }
+  .score { font-size: 44px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+  .score small { font-size: 18px; color: var(--muted); font-weight: 500; }
+  .score.good { color: var(--good); } .score.fair { color: var(--warning); } .score.bad { color: var(--error); }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 24px; }
+  .chip { border: 1px solid var(--border); background: var(--panel); color: var(--text); border-radius: 999px;
+          padding: 4px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .chip[aria-pressed="true"] { border-color: var(--text); font-weight: 600; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
+  section > h2 { font-size: 14px; margin: 0; padding: 12px 16px; border-bottom: 1px solid var(--border);
+                 font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .finding { padding: 12px 16px; border-bottom: 1px solid var(--border); display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+  .finding:last-child { border-bottom: 0; }
+  .badge { font-size: 11px; font-weight: 700; letter-spacing: .03em; padding: 2px 8px; border-radius: 4px; height: fit-content; }
+  .badge.error { color: var(--error); background: var(--error-bg); }
+  .badge.warning { color: var(--warning); background: var(--warning-bg); }
+  .badge.info { color: var(--info); background: var(--info-bg); }
+  .meta { grid-column: 2; font-size: 13px; color: var(--muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  details { grid-column: 2; font-size: 14px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  details p { margin: 6px 0 0; white-space: pre-wrap; }
+  ul.passed { list-style: none; margin: 0; padding: 8px 16px; }
+  ul.passed li { padding: 4px 0; }
+  ul.passed li::before { content: "✓ "; color: var(--good); font-weight: 700; }
+  .empty { padding: 24px 16px; color: var(--good); font-weight: 600; }
+  footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="score good">87<small>/100</small></div>
+    <div>
+      <h1>StackGuard report</h1>
+      <div class="muted">1 errors · 1 warnings · 0 info ·
+        1 files · 2 resources · 4 rules</div>
+    </div>
+  </header>
+
+  
+  <div class="chips" role="group" aria-label="Filter by severity">
+    <button class="chip" data-filter="all" aria-pressed="true">All (2)</button>
+    <button class="chip" data-filter="error" aria-pressed="false">Errors (1)</button>
+    <button class="chip" data-filter="warning" aria-pressed="false">Warnings (1)</button>
+    <button class="chip" data-filter="info" aria-pressed="false">Info (0)</button>
+  </div>
+  
+  <section class="file">
+    <h2>docker-compose.yml</h2>
+    
+    <div class="finding" data-severity="error">
+      <span class="badge error">ERROR</span>
+      <div>Service &#39;api&#39; runs in privileged mode &lt;b&gt;</div>
+      <div class="meta">COMP_SEC_001 · line 4 · api</div>
+      <details><summary>Remediation</summary><p>Remove `privileged: true`.</p></details>
+    </div>
+    
+    <div class="finding" data-severity="warning">
+      <span class="badge warning">WARNING</span>
+      <div>Service &#39;redis&#39; has no memory limit</div>
+      <div class="meta">COMP_OPS_001 · line 9 · redis</div>
+      
+    </div>
+    
+  </section>
+  
+  
+
+  
+  <section>
+    <h2>Passed (1)</h2>
+    <ul class="passed"><li>Containers use pinned image versions <code class="muted">COMP_MNT_001</code></li></ul>
+  </section>
+  
+
+  
+  <section>
+    <h2>Could not parse (1)</h2>
+    <ul class="passed"><li><code>broken.yml</code>: yaml: line 2: did not find expected key</li></ul>
+  </section>
+  
+
+  <footer>Generated by StackGuard 1.2.3</footer>
+</main>
+<script>
+  document.querySelectorAll(".chip").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var f = btn.dataset.filter;
+      document.querySelectorAll(".chip").forEach(function (b) { b.setAttribute("aria-pressed", b === btn ? "true" : "false"); });
+      document.querySelectorAll(".finding").forEach(function (el) {
+        el.hidden = f !== "all" && el.dataset.severity !== f;
+      });
+      document.querySelectorAll("section.file").forEach(function (s) {
+        s.hidden = !s.querySelector(".finding:not([hidden])");
+      });
+    });
+  });
+</script>
+</body>
+</html>

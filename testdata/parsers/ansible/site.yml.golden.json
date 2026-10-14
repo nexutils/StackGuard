@@ -1,0 +1,299 @@
+[
+  {
+    "target": "ansible",
+    "type": "ansible",
+    "name": "site.yml",
+    "file": "ansible/site.yml",
+    "line": 2,
+    "properties": {
+      "plays": [
+        {
+          "become": true,
+          "blocks": [
+            {
+              "block": [
+                {
+                  "arg_pairs": [
+                    "name=nginx"
+                  ],
+                  "args": {
+                    "name": "nginx"
+                  },
+                  "become_effective": false,
+                  "keywords": [
+                    "apt",
+                    "name"
+                  ],
+                  "kind": "task",
+                  "module": "apt",
+                  "module_raw": "apt",
+                  "name": "Install"
+                },
+                {
+                  "arg_pairs": [
+                    "cmd=/bin/true"
+                  ],
+                  "args": {
+                    "cmd": "/bin/true"
+                  },
+                  "become_effective": false,
+                  "keywords": [
+                    "ansible.builtin.command"
+                  ],
+                  "kind": "task",
+                  "module": "command",
+                  "module_raw": "ansible.builtin.command"
+                }
+              ],
+              "rescue": [
+                {
+                  "arg_pairs": [
+                    "msg=failed"
+                  ],
+                  "args": {
+                    "msg": "failed"
+                  },
+                  "become_effective": false,
+                  "keywords": [
+                    "debug",
+                    "name"
+                  ],
+                  "kind": "task",
+                  "module": "debug",
+                  "module_raw": "debug",
+                  "name": "Report"
+                }
+              ]
+            }
+          ],
+          "handlers": [
+            {
+              "arg_pairs": [
+                "name=nginx",
+                "state=restarted"
+              ],
+              "args": {
+                "name": "nginx",
+                "state": "restarted"
+              },
+              "become_effective": true,
+              "keywords": [
+                "name",
+                "service"
+              ],
+              "kind": "handler",
+              "module": "service",
+              "module_raw": "service",
+              "name": "restart nginx"
+            }
+          ],
+          "hosts": "web",
+          "name": "Web servers",
+          "task_count": 4,
+          "tasks": [
+            {
+              "arg_pairs": [
+                "update_cache=true"
+              ],
+              "args": {
+                "update_cache": true
+              },
+              "become_effective": true,
+              "keywords": [
+                "ansible.builtin.apt",
+                "name"
+              ],
+              "kind": "pre_task",
+              "module": "apt",
+              "module_raw": "ansible.builtin.apt",
+              "name": "Update cache"
+            },
+            {
+              "arg_pairs": [
+                "name=nginx"
+              ],
+              "args": {
+                "name": "nginx"
+              },
+              "become_effective": true,
+              "in_block": true,
+              "keywords": [
+                "apt",
+                "name"
+              ],
+              "kind": "task",
+              "module": "apt",
+              "module_raw": "apt",
+              "name": "Install"
+            },
+            {
+              "arg_pairs": [
+                "cmd=/bin/true"
+              ],
+              "args": {
+                "cmd": "/bin/true"
+              },
+              "become_effective": true,
+              "in_block": true,
+              "keywords": [
+                "ansible.builtin.command"
+              ],
+              "kind": "task",
+              "module": "command",
+              "module_raw": "ansible.builtin.command"
+            },
+            {
+              "arg_pairs": [
+                "msg=failed"
+              ],
+              "args": {
+                "msg": "failed"
+              },
+              "become_effective": true,
+              "in_rescue": true,
+              "keywords": [
+                "debug",
+                "name"
+              ],
+              "kind": "task",
+              "module": "debug",
+              "module_raw": "debug",
+              "name": "Report"
+            }
+          ]
+        },
+        {
+          "task_count": 0
+        }
+      ],
+      "strings": [
+        "restart nginx",
+        "nginx",
+        "restarted",
+        "web",
+        "Web servers",
+        "Update cache",
+        "nginx",
+        "Install",
+        "/bin/true",
+        "Group",
+        "failed",
+        "Report",
+        "other.yml"
+      ],
+      "tasks": [
+        {
+          "arg_pairs": [
+            "update_cache=true"
+          ],
+          "args": {
+            "update_cache": true
+          },
+          "become_effective": true,
+          "keywords": [
+            "ansible.builtin.apt",
+            "name"
+          ],
+          "kind": "pre_task",
+          "module": "apt",
+          "module_raw": "ansible.builtin.apt",
+          "name": "Update cache"
+        },
+        {
+          "arg_pairs": [
+            "name=nginx"
+          ],
+          "args": {
+            "name": "nginx"
+          },
+          "become_effective": true,
+          "in_block": true,
+          "keywords": [
+            "apt",
+            "name"
+          ],
+          "kind": "task",
+          "module": "apt",
+          "module_raw": "apt",
+          "name": "Install"
+        },
+        {
+          "arg_pairs": [
+            "cmd=/bin/true"
+          ],
+          "args": {
+            "cmd": "/bin/true"
+          },
+          "become_effective": true,
+          "in_block": true,
+          "keywords": [
+            "ansible.builtin.command"
+          ],
+          "kind": "task",
+          "module": "command",
+          "module_raw": "ansible.builtin.command"
+        },
+        {
+          "arg_pairs": [
+            "msg=failed"
+          ],
+          "args": {
+            "msg": "failed"
+          },
+          "become_effective": true,
+          "in_rescue": true,
+          "keywords": [
+            "debug",
+            "name"
+          ],
+          "kind": "task",
+          "module": "debug",
+          "module_raw": "debug",
+          "name": "Report"
+        },
+        {
+          "arg_pairs": [
+            "name=nginx",
+            "state=restarted"
+          ],
+          "args": {
+            "name": "nginx",
+            "state": "restarted"
+          },
+          "become_effective": true,
+          "keywords": [
+            "name",
+            "service"
+          ],
+          "kind": "handler",
+          "module": "service",
+          "module_raw": "service",
+          "name": "restart nginx"
+        }
+      ]
+    },
+    "locations": {
+      "plays.0": {
+        "line": 2
+      },
+      "plays.1": {
+        "line": 25
+      },
+      "tasks.0": {
+        "line": 6
+      },
+      "tasks.1": {
+        "line": 12
+      },
+      "tasks.2": {
+        "line": 15
+      },
+      "tasks.3": {
+        "line": 17
+      },
+      "tasks.4": {
+        "line": 21
+      }
+    }
+  }
+]

@@ -1,0 +1,475 @@
+[
+  {
+    "target": "terraform",
+    "type": "terraform",
+    "name": "terraform",
+    "file": "terraform/main.tf",
+    "line": 1,
+    "properties": {
+      "context": {
+        "ci_text": null,
+        "environment": "",
+        "files": [
+          "main.tf"
+        ],
+        "is_root_module": true,
+        "state_store": {
+          "found": false,
+          "soft_delete": false,
+          "versioning": false
+        }
+      },
+      "data_sources": [
+        {
+          "address": "data.aws_ami.ubuntu",
+          "attr_pairs": [
+            {
+              "key": "most_recent",
+              "path": "most_recent",
+              "value": "true"
+            },
+            {
+              "key": "0",
+              "path": "owners.0",
+              "value": "099720109477"
+            }
+          ],
+          "attrs": {
+            "most_recent": true,
+            "owners": [
+              "099720109477"
+            ]
+          },
+          "file": "main.tf",
+          "has_count": false,
+          "has_for_each": false,
+          "kind": "data",
+          "lifecycle": null,
+          "line": 18,
+          "module": "",
+          "name": "ubuntu",
+          "policy_statements": null,
+          "provider": "aws",
+          "referenced_by": [],
+          "references": [],
+          "stateful": false,
+          "taggable": false,
+          "tags": {},
+          "type": "aws_ami"
+        }
+      ],
+      "locals_entries": [
+        {
+          "name": "name",
+          "value": "app-${var.region}"
+        }
+      ],
+      "module_calls": [
+        {
+          "attr_pairs": [
+            {
+              "key": "cidr",
+              "path": "cidr",
+              "value": "10.0.0.0/16"
+            },
+            {
+              "key": "source",
+              "path": "source",
+              "value": "terraform-aws-modules/vpc/aws"
+            },
+            {
+              "key": "version",
+              "path": "version",
+              "value": "5.0.0"
+            }
+          ],
+          "attrs": {
+            "cidr": "10.0.0.0/16",
+            "source": "terraform-aws-modules/vpc/aws",
+            "version": "5.0.0"
+          },
+          "local": false,
+          "name": "vpc",
+          "source": "terraform-aws-modules/vpc/aws",
+          "version": "5.0.0"
+        }
+      ],
+      "outputs": [
+        {
+          "description": "",
+          "has_value": true,
+          "name": "sg_id",
+          "sensitive": false,
+          "value": "${aws_security_group.web.id}"
+        }
+      ],
+      "providers": [
+        {
+          "alias": "",
+          "attr_pairs": [
+            {
+              "key": "region",
+              "path": "region",
+              "value": "${var.region}"
+            }
+          ],
+          "attrs": {
+            "region": "${var.region}"
+          },
+          "default_tags": {},
+          "name": "aws",
+          "region": "${var.region}"
+        }
+      ],
+      "resources": [
+        {
+          "address": "aws_security_group.web",
+          "attr_pairs": [
+            {
+              "key": "description",
+              "path": "description",
+              "value": "Web"
+            },
+            {
+              "key": "0",
+              "path": "ingress.0.cidr_blocks.0",
+              "value": "0.0.0.0/0"
+            },
+            {
+              "key": "from_port",
+              "path": "ingress.0.from_port",
+              "value": "443"
+            },
+            {
+              "key": "protocol",
+              "path": "ingress.0.protocol",
+              "value": "tcp"
+            },
+            {
+              "key": "to_port",
+              "path": "ingress.0.to_port",
+              "value": "443"
+            },
+            {
+              "key": "0",
+              "path": "ingress.1.cidr_blocks.0",
+              "value": "10.0.0.0/8"
+            },
+            {
+              "key": "from_port",
+              "path": "ingress.1.from_port",
+              "value": "80"
+            },
+            {
+              "key": "protocol",
+              "path": "ingress.1.protocol",
+              "value": "tcp"
+            },
+            {
+              "key": "to_port",
+              "path": "ingress.1.to_port",
+              "value": "80"
+            },
+            {
+              "key": "name",
+              "path": "name",
+              "value": "${local.name}"
+            },
+            {
+              "key": "Name",
+              "path": "tags.Name",
+              "value": "web"
+            },
+            {
+              "key": "Tier",
+              "path": "tags.Tier",
+              "value": "1"
+            }
+          ],
+          "attrs": {
+            "description": "Web",
+            "ingress": [
+              {
+                "cidr_blocks": [
+                  "0.0.0.0/0"
+                ],
+                "from_port": 443,
+                "protocol": "tcp",
+                "to_port": 443
+              },
+              {
+                "cidr_blocks": [
+                  "10.0.0.0/8"
+                ],
+                "from_port": 80,
+                "protocol": "tcp",
+                "to_port": 80
+              }
+            ],
+            "name": "${local.name}",
+            "tags": {
+              "Name": "web",
+              "Tier": 1
+            }
+          },
+          "file": "main.tf",
+          "has_count": false,
+          "has_for_each": false,
+          "kind": "resource",
+          "lifecycle": null,
+          "line": 23,
+          "module": "",
+          "name": "web",
+          "policy_statements": null,
+          "provider": "aws",
+          "referenced_by": [],
+          "references": [],
+          "stateful": false,
+          "taggable": true,
+          "tags": {
+            "Name": "web",
+            "Tier": 1
+          },
+          "type": "aws_security_group"
+        }
+      ],
+      "strings": [
+        "0.0.0.0/0",
+        "099720109477",
+        "10.0.0.0/16",
+        "10.0.0.0/8",
+        "5.0.0",
+        "Web",
+        "eu-west-1",
+        "tcp",
+        "terraform-aws-modules/vpc/aws",
+        "web"
+      ],
+      "summary": {
+        "az_count": 0,
+        "backend_type": "",
+        "data_count": 1,
+        "has_backend": false,
+        "module_count": 1,
+        "output_count": 1,
+        "provider_count": 1,
+        "providers": [
+          "aws"
+        ],
+        "resource_count": 1,
+        "types": {
+          "aws_security_group": 1
+        },
+        "variable_count": 1
+      },
+      "terraform": {
+        "required_version": "\u003e= 1.6"
+      },
+      "variables": [
+        {
+          "default": "eu-west-1",
+          "description": "",
+          "has_default": true,
+          "has_validation": false,
+          "name": "region",
+          "sensitive": false,
+          "type": "${string}"
+        }
+      ]
+    },
+    "locations": {
+      "data_sources.0": {
+        "line": 18,
+        "column": 1,
+        "end_line": 18,
+        "end_column": 5
+      },
+      "data_sources.0.attrs.most_recent": {
+        "line": 19,
+        "column": 3,
+        "end_line": 19,
+        "end_column": 14
+      },
+      "data_sources.0.attrs.owners": {
+        "line": 20,
+        "column": 3,
+        "end_line": 20,
+        "end_column": 9
+      },
+      "locals.0.name": {
+        "line": 15,
+        "column": 3,
+        "end_line": 15,
+        "end_column": 7
+      },
+      "module_calls.0": {
+        "line": 44,
+        "column": 1,
+        "end_line": 44,
+        "end_column": 7
+      },
+      "module_calls.0.cidr": {
+        "line": 47,
+        "column": 3,
+        "end_line": 47,
+        "end_column": 7
+      },
+      "module_calls.0.source": {
+        "line": 45,
+        "column": 3,
+        "end_line": 45,
+        "end_column": 9
+      },
+      "module_calls.0.version": {
+        "line": 46,
+        "column": 3,
+        "end_line": 46,
+        "end_column": 10
+      },
+      "outputs.0": {
+        "line": 50,
+        "column": 1,
+        "end_line": 50,
+        "end_column": 7
+      },
+      "outputs.0.value": {
+        "line": 51,
+        "column": 3,
+        "end_line": 51,
+        "end_column": 8
+      },
+      "providers.0": {
+        "line": 5,
+        "column": 1,
+        "end_line": 5,
+        "end_column": 9
+      },
+      "providers.0.region": {
+        "line": 6,
+        "column": 3,
+        "end_line": 6,
+        "end_column": 9
+      },
+      "resources.0": {
+        "line": 23,
+        "column": 1,
+        "end_line": 23,
+        "end_column": 9
+      },
+      "resources.0.attrs.description": {
+        "line": 25,
+        "column": 3,
+        "end_line": 25,
+        "end_column": 14
+      },
+      "resources.0.attrs.ingress": {
+        "line": 26,
+        "column": 3,
+        "end_line": 26,
+        "end_column": 10
+      },
+      "resources.0.attrs.ingress.0": {
+        "line": 26,
+        "column": 3,
+        "end_line": 26,
+        "end_column": 10
+      },
+      "resources.0.attrs.ingress.0.cidr_blocks": {
+        "line": 30,
+        "column": 5,
+        "end_line": 30,
+        "end_column": 16
+      },
+      "resources.0.attrs.ingress.0.from_port": {
+        "line": 27,
+        "column": 5,
+        "end_line": 27,
+        "end_column": 14
+      },
+      "resources.0.attrs.ingress.0.protocol": {
+        "line": 29,
+        "column": 5,
+        "end_line": 29,
+        "end_column": 13
+      },
+      "resources.0.attrs.ingress.0.to_port": {
+        "line": 28,
+        "column": 5,
+        "end_line": 28,
+        "end_column": 12
+      },
+      "resources.0.attrs.ingress.1": {
+        "line": 32,
+        "column": 3,
+        "end_line": 32,
+        "end_column": 10
+      },
+      "resources.0.attrs.ingress.1.cidr_blocks": {
+        "line": 36,
+        "column": 5,
+        "end_line": 36,
+        "end_column": 16
+      },
+      "resources.0.attrs.ingress.1.from_port": {
+        "line": 33,
+        "column": 5,
+        "end_line": 33,
+        "end_column": 14
+      },
+      "resources.0.attrs.ingress.1.protocol": {
+        "line": 35,
+        "column": 5,
+        "end_line": 35,
+        "end_column": 13
+      },
+      "resources.0.attrs.ingress.1.to_port": {
+        "line": 34,
+        "column": 5,
+        "end_line": 34,
+        "end_column": 12
+      },
+      "resources.0.attrs.name": {
+        "line": 24,
+        "column": 3,
+        "end_line": 24,
+        "end_column": 7
+      },
+      "resources.0.attrs.tags": {
+        "line": 38,
+        "column": 3,
+        "end_line": 38,
+        "end_column": 7
+      },
+      "terraform": {
+        "line": 1,
+        "column": 1,
+        "end_line": 1,
+        "end_column": 10
+      },
+      "terraform.required_version": {
+        "line": 2,
+        "column": 3,
+        "end_line": 2,
+        "end_column": 19
+      },
+      "variables.0": {
+        "line": 9,
+        "column": 1,
+        "end_line": 9,
+        "end_column": 9
+      },
+      "variables.0.default": {
+        "line": 11,
+        "column": 3,
+        "end_line": 11,
+        "end_column": 10
+      },
+      "variables.0.type": {
+        "line": 10,
+        "column": 3,
+        "end_line": 10,
+        "end_column": 7
+      }
+    }
+  }
+]
