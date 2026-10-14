@@ -1,0 +1,4 @@
+FROM alpine:3.19
+ENV DB_PASSWORD_FILE=/run/secrets/db
+ENV DB_PASSWORD=${DB_PASSWORD}
+CMD ["app"]
