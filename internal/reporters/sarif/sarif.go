@@ -205,9 +205,13 @@ func toRule(r *models.Rule) rule {
 	if r.Remediation != "" {
 		plain += "\n\nRemediation: " + r.Remediation
 	}
-	props := ruleProperties{Tags: append([]string{r.Category, r.Target}, r.Tags...)}
+	tags := []string{r.Category, r.Target}
 	if r.Category == models.CategorySecurity {
-		props.Tags = append(props.Tags, "security")
+		tags = append(tags, "security")
+	}
+	tags = append(tags, r.Tags...)
+	props := ruleProperties{Tags: dedup(tags)}
+	if r.Category == models.CategorySecurity {
 		props.SecuritySeverity = securitySeverity(r.Severity)
 	}
 	var helpURI string
@@ -234,6 +238,18 @@ func relURI(base, file string) string {
 		}
 	}
 	return strings.TrimPrefix(filepath.ToSlash(p), "./")
+}
+
+func dedup(ss []string) []string {
+	seen := make(map[string]bool, len(ss))
+	out := ss[:0]
+	for _, s := range ss {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // pascal turns a title into a SARIF-friendly rule name ("Privileged

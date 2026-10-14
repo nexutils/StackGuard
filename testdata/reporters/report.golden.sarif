@@ -76,8 +76,7 @@
                 "tags": [
                   "security",
                   "compose",
-                  "cis-docker-5.4",
-                  "security"
+                  "cis-docker-5.4"
                 ],
                 "security-severity": "8.0"
               }
@@ -101,8 +100,7 @@
               "properties": {
                 "tags": [
                   "security",
-                  "terraform",
-                  "security"
+                  "terraform"
                 ],
                 "security-severity": "8.0"
               }
