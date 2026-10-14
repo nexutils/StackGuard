@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: app
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      volumes:
+        - name: data
+          nfs:
+            server: 10.0.0.1
+            path: /exports
+      containers:
+        - name: web
+          image: web:1.0.0
