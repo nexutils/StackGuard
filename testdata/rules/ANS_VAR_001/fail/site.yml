@@ -1,0 +1,8 @@
+---
+- name: Web
+  hosts: web
+  vars:
+    shared_var: a
+  tasks:
+    - name: ping
+      ansible.builtin.ping:

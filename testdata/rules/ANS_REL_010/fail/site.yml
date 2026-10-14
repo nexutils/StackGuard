@@ -1,0 +1,10 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: call
+      ansible.builtin.uri:
+        url: https://example.com
+      retries: 3
+      until: r is succeeded
+      register: r

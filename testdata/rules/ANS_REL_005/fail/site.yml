@@ -1,0 +1,9 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: deploy
+      ansible.builtin.copy:
+        src: app
+        dest: /opt/app
+        mode: "0644"

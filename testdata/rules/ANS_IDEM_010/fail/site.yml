@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: svc
+      ansible.builtin.service:
+        name: nginx
+        state: started

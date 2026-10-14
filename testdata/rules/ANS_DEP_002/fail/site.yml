@@ -1,0 +1,8 @@
+---
+- name: Web
+  hosts: web
+  tasks:
+    - name: copy
+      copy:
+        src: a
+        dest: /b

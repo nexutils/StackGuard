@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: call
+      ansible.builtin.uri:
+        url: http://example.com/api
+        url_password: secret

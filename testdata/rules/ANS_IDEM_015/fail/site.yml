@@ -1,0 +1,6 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: run
+      ansible.builtin.command: FOO=bar /usr/bin/do

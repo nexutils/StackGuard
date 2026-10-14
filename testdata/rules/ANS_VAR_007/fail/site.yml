@@ -1,0 +1,5 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - ansible.builtin.ping:

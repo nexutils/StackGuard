@@ -1,0 +1,7 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: show
+      ansible.builtin.debug:
+        var: db_password

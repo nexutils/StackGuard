@@ -1,0 +1,6 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: install
+      ansible.builtin.shell: apt-get install -y nginx

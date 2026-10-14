@@ -1,0 +1,8 @@
+---
+- name: Web
+  hosts: web
+  vars:
+    db_password: hunter2secret
+  tasks:
+    - name: ping
+      ansible.builtin.ping:

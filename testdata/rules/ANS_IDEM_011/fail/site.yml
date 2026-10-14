@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: fw
+      ansible.posix.firewalld:
+        port: 80/tcp
+        state: enabled

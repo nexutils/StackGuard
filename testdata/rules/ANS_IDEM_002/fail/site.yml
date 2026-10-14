@@ -1,0 +1,6 @@
+---
+- name: Web
+  hosts: web
+  tasks:
+    - name: do thing
+      ansible.builtin.command: echo hello

@@ -1,0 +1,9 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: grant
+      community.mysql.mysql_user:
+        name: app
+        priv: "*.*:ALL"
+        host: "%"

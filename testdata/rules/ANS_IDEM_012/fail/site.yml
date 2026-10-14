@@ -1,0 +1,9 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: sc
+      ansible.posix.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        reload: false

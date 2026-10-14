@@ -1,0 +1,9 @@
+---
+- name: p
+  hosts: web
+  strategy: free
+  tasks:
+    - name: once
+      ansible.builtin.command: echo hi
+      run_once: true
+      changed_when: false

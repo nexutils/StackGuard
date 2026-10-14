@@ -1,0 +1,8 @@
+---
+- name: Web
+  hosts: web
+  tasks:
+    - name: fetch
+      ansible.builtin.get_url:
+        url: https://example.com/file
+        dest: /tmp/file

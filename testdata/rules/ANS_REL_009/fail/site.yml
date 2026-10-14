@@ -1,0 +1,8 @@
+---
+- name: p
+  hosts: web
+  tasks:
+    - name: deleg
+      ansible.builtin.command: echo hi
+      delegate_to: localhost
+      changed_when: false
