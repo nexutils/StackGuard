@@ -69,7 +69,7 @@ func buildModule(dir, anchor string, files []tfFile) *models.Resource {
 		Target:     Target,
 		Type:       Target,
 		Name:       moduleName,
-		File:       filepath.Join(dir, anchor),
+		File:       filepath.ToSlash(filepath.Join(dir, anchor)),
 		Line:       1,
 		Properties: props,
 		Locations:  b.locs,
