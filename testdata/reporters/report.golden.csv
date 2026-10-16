@@ -1,0 +1,3 @@
+rule_id,severity,category,target,file,line,resource,title,message
+COMP_SEC_001,ERROR,security,compose,docker-compose.yml,4,api,Privileged container,Service 'api' runs in privileged mode <b>
+COMP_OPS_001,WARNING,operational,compose,docker-compose.yml,9,redis,Missing memory limit,Service 'redis' has no memory limit

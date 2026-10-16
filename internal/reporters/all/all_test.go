@@ -73,6 +73,7 @@ func TestGolden(t *testing.T) {
 	opts := reporters.Options{ToolVersion: "1.2.3", BaseDir: "/work"}
 	for format, file := range map[string]string{
 		"console": "console.golden.txt",
+		"csv":     "report.golden.csv",
 		"json":    "report.golden.json",
 		"sarif":   "report.golden.sarif",
 		"html":    "report.golden.html",

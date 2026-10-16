@@ -8,6 +8,7 @@ import (
 
 	"github.com/nexutils/StackGuard/internal/reporters"
 	"github.com/nexutils/StackGuard/internal/reporters/console"
+	"github.com/nexutils/StackGuard/internal/reporters/csv"
 	"github.com/nexutils/StackGuard/internal/reporters/html"
 	"github.com/nexutils/StackGuard/internal/reporters/json"
 	"github.com/nexutils/StackGuard/internal/reporters/sarif"
@@ -15,6 +16,7 @@ import (
 
 var factories = map[string]reporters.Factory{
 	"console": console.New,
+	"csv":     csv.New,
 	"json":    json.New,
 	"sarif":   sarif.New,
 	"html":    html.New,
