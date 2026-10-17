@@ -9,6 +9,9 @@ on:
     branches: [main]
     paths:
       - "web/**"
+      - "cmd/playground/**"
+      - "internal/**"
+      - "rules/**"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 
@@ -30,6 +33,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build playground WASM
+        run: GOOS=js GOARCH=wasm go build -o web/stackguard.wasm ./cmd/playground
+      - name: Copy wasm_exec.js
+        run: cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" web/wasm_exec.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -22,6 +22,10 @@ coverage.*
 /*.html
 /stackguard-report.*
 
+# Playground WASM build artifacts (CI builds these fresh)
+web/stackguard.wasm
+web/wasm_exec.js
+
 # Go workspace files
 go.work
 go.work.sum

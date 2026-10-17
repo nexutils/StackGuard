@@ -75,6 +75,12 @@ docs: ## Regenerate docs/rules from the built-in rules
 examples: build ## Scan the example projects
 	./bin/$(BINARY) scan examples --fail-on none
 
+.PHONY: playground
+playground: ## Build the playground WASM binary for local dev
+	GOOS=js GOARCH=wasm $(GO) build -o web/stackguard.wasm ./cmd/playground
+	cp "$$($(GO) env GOROOT)/lib/wasm/wasm_exec.js" web/wasm_exec.js
+	@echo "Serve web/ with a local HTTP server, e.g.: python3 -m http.server -d web 8080"
+
 .PHONY: snapshot
 snapshot: ## Build release artifacts locally with GoReleaser
 	goreleaser release --snapshot --clean
