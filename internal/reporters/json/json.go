@@ -9,16 +9,17 @@ import (
 	"github.com/nexutils/StackGuard/internal/reporters"
 )
 
-// Document is the JSON report schema (schema_version "1").
+// Document is the JSON report schema (schema_version "2").
 type Document struct {
-	SchemaVersion string              `json:"schema_version"`
-	Tool          Tool                `json:"tool"`
-	Score         int                 `json:"score"`
-	Summary       models.Score        `json:"summary"`
-	Findings      []models.Finding    `json:"findings"`
-	Rules         []RuleResult        `json:"rules"`
-	Diagnostics   []models.Diagnostic `json:"diagnostics"`
-	Stats         models.ScanStats    `json:"stats"`
+	SchemaVersion string               `json:"schema_version"`
+	Tool          Tool                 `json:"tool"`
+	Repository    *models.RepoMetadata `json:"repository,omitempty"`
+	Score         int                  `json:"score"`
+	Summary       models.Score         `json:"summary"`
+	Findings      []models.Finding     `json:"findings"`
+	Rules         []RuleResult         `json:"rules"`
+	Diagnostics   []models.Diagnostic  `json:"diagnostics"`
+	Stats         models.ScanStats     `json:"stats"`
 }
 
 // Tool identifies the producer.
@@ -51,6 +52,7 @@ func (j *Reporter) Report(w io.Writer, r *models.Report) error {
 	doc := Document{
 		SchemaVersion: r.SchemaVersion,
 		Tool:          Tool{Name: "stackguard", Version: j.opts.ToolVersion},
+		Repository:    r.Repository,
 		Score:         r.Score.Total,
 		Summary:       r.Score,
 		Findings:      r.Findings,

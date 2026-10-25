@@ -36,9 +36,21 @@ type log struct {
 }
 
 type run struct {
-	Tool        tool         `json:"tool"`
-	Results     []result     `json:"results"`
-	Invocations []invocation `json:"invocations"`
+	Tool                      tool                       `json:"tool"`
+	Results                   []result                   `json:"results"`
+	Invocations               []invocation               `json:"invocations"`
+	VersionControlProvenance  []versionControlProvenance  `json:"versionControlProvenance,omitempty"`
+}
+
+type versionControlProvenance struct {
+	RepositoryURI string          `json:"repositoryUri"`
+	RevisionID    string          `json:"revisionId,omitempty"`
+	Branch        string          `json:"branch,omitempty"`
+	MappedTo      *mappedTo       `json:"mappedTo,omitempty"`
+}
+
+type mappedTo struct {
+	URIBaseID string `json:"uriBaseId"`
 }
 
 type tool struct {
@@ -178,14 +190,25 @@ func (s *Reporter) Report(w io.Writer, r *models.Report) error {
 		})
 	}
 
+	theRun := run{
+		Tool:        tool{Driver: drv},
+		Results:     results,
+		Invocations: []invocation{{ExecutionSuccessful: true}},
+	}
+	if repo := r.Repository; repo != nil && repo.RemoteURL != "" {
+		vcp := versionControlProvenance{
+			RepositoryURI: repo.RemoteURL,
+			RevisionID:    repo.CommitSHA,
+			Branch:        repo.Branch,
+			MappedTo:      &mappedTo{URIBaseID: srcRoot},
+		}
+		theRun.VersionControlProvenance = []versionControlProvenance{vcp}
+	}
+
 	doc := log{
 		Schema:  schemaURI,
 		Version: version,
-		Runs: []run{{
-			Tool:        tool{Driver: drv},
-			Results:     results,
-			Invocations: []invocation{{ExecutionSuccessful: true}},
-		}},
+		Runs:    []run{theRun},
 	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")

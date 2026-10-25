@@ -256,6 +256,7 @@ func (e *Engine) run(ctx context.Context, inputs []input, start time.Time) (*mod
 	rep.Stats.RulesEvaluated = len(e.rules)
 	rep.Score = e.opts.Scorer.Score(rep.Findings)
 	rep.Stats.DurationMillis = time.Since(start).Milliseconds()
+	rep.Stats.ScannedAt = start.UTC().Format(time.RFC3339)
 	return rep, nil
 }
 

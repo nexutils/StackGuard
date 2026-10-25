@@ -2,7 +2,16 @@ package models
 
 // ReportSchemaVersion is bumped whenever the JSON report shape changes in a
 // backwards-incompatible way.
-const ReportSchemaVersion = "1"
+const ReportSchemaVersion = "2"
+
+// RepoMetadata identifies the repository that was scanned, when available.
+type RepoMetadata struct {
+	Name       string `json:"name,omitempty"`
+	RemoteURL  string `json:"remote_url,omitempty"`
+	Branch     string `json:"branch,omitempty"`
+	CommitSHA  string `json:"commit_sha,omitempty"`
+	CommitDate string `json:"commit_date,omitempty"`
+}
 
 // Score summarises findings as a single number plus per-severity counts.
 type Score struct {
@@ -48,16 +57,18 @@ type ScanStats struct {
 	FilesParsed     int   `json:"files_parsed"`
 	Resources       int   `json:"resources"`
 	RulesEvaluated  int   `json:"rules_evaluated"`
-	Suppressed      int   `json:"suppressed"`
-	DurationMillis  int64 `json:"duration_ms"`
+	Suppressed      int    `json:"suppressed"`
+	DurationMillis  int64  `json:"duration_ms"`
+	ScannedAt       string `json:"scanned_at,omitempty"`
 }
 
 // Report is the complete result of a scan and the input to every reporter.
 type Report struct {
-	SchemaVersion string       `json:"schema_version"`
-	Score         Score        `json:"score"`
-	Findings      []Finding    `json:"findings"`
-	Results       []RuleResult `json:"results"`
-	Diagnostics   []Diagnostic `json:"diagnostics"`
-	Stats         ScanStats    `json:"stats"`
+	SchemaVersion string        `json:"schema_version"`
+	Repository    *RepoMetadata `json:"repository,omitempty"`
+	Score         Score         `json:"score"`
+	Findings      []Finding     `json:"findings"`
+	Results       []RuleResult  `json:"results"`
+	Diagnostics   []Diagnostic  `json:"diagnostics"`
+	Stats         ScanStats     `json:"stats"`
 }
