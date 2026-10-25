@@ -106,5 +106,50 @@ func TestDetect(t *testing.T) {
 		if info.Name != "" {
 			t.Errorf("Name = %q, want empty (no remote)", info.Name)
 		}
+		if len(info.Tags) != 0 {
+			t.Errorf("Tags = %v, want empty (no tags)", info.Tags)
+		}
+	})
+
+	t.Run("tags at HEAD", func(t *testing.T) {
+		dir := t.TempDir()
+		run := func(args ...string) {
+			t.Helper()
+			cmd := exec.Command(args[0], args[1:]...)
+			cmd.Dir = dir
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				t.Fatalf("%v failed: %v", args, err)
+			}
+		}
+		run("git", "init")
+		run("git", "config", "user.email", "test@test.com")
+		run("git", "config", "user.name", "Test")
+		if err := os.WriteFile(dir+"/f.txt", []byte("hello"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		run("git", "add", ".")
+		run("git", "commit", "-m", "init")
+		run("git", "tag", "v1.0.0")
+		run("git", "tag", "latest")
+
+		info, err := Detect(dir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if info == nil {
+			t.Fatal("expected non-nil info")
+		}
+		if len(info.Tags) != 2 {
+			t.Fatalf("Tags = %v, want 2 tags", info.Tags)
+		}
+		tagSet := map[string]bool{}
+		for _, tag := range info.Tags {
+			tagSet[tag] = true
+		}
+		if !tagSet["v1.0.0"] || !tagSet["latest"] {
+			t.Errorf("Tags = %v, want [v1.0.0, latest]", info.Tags)
+		}
 	})
 }

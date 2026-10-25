@@ -14,6 +14,7 @@ type Document struct {
 	SchemaVersion string               `json:"schema_version"`
 	Tool          Tool                 `json:"tool"`
 	Repository    *models.RepoMetadata `json:"repository,omitempty"`
+	Config        *models.ScanConfig   `json:"config,omitempty"`
 	Score         int                  `json:"score"`
 	Summary       models.Score         `json:"summary"`
 	Findings      []models.Finding     `json:"findings"`
@@ -53,6 +54,7 @@ func (j *Reporter) Report(w io.Writer, r *models.Report) error {
 		SchemaVersion: r.SchemaVersion,
 		Tool:          Tool{Name: "stackguard", Version: j.opts.ToolVersion},
 		Repository:    r.Repository,
+		Config:        r.Config,
 		Score:         r.Score.Total,
 		Summary:       r.Score,
 		Findings:      r.Findings,

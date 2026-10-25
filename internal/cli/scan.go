@@ -79,9 +79,11 @@ func newScanCommand(a *app) *cobra.Command {
 						Branch:     info.Branch,
 						CommitSHA:  info.CommitSHA,
 						CommitDate: info.CommitDate,
+						Tags:       info.Tags,
 					}
 				}
 			}
+			rep.Config = buildScanConfig(cfg, &sf)
 			if err := a.writeReport(cfg.Format, output, quiet, showPassed, omitSkipped, rep); err != nil {
 				return err
 			}
@@ -205,4 +207,21 @@ func upper(ss []string) []string {
 		out[i] = strings.ToUpper(strings.TrimSpace(s))
 	}
 	return out
+}
+
+func buildScanConfig(cfg config.Resolved, sf *scanFlags) *models.ScanConfig {
+	disabled := append(append([]string{}, cfg.Config.DisabledRules...), upper(sf.disable)...)
+	enabled := append(append([]string{}, cfg.Config.EnabledRules...), upper(sf.enable)...)
+	exclude := append(append([]string{}, cfg.Config.Exclude...), sf.exclude...)
+	sc := &models.ScanConfig{
+		Profile:       cfg.Config.Profile,
+		Targets:       cfg.Config.Targets,
+		DisabledRules: disabled,
+		EnabledRules:  enabled,
+		Exclude:       exclude,
+	}
+	if sc.Profile == "" && len(sc.Targets) == 0 && len(sc.DisabledRules) == 0 && len(sc.EnabledRules) == 0 && len(sc.Exclude) == 0 {
+		return nil
+	}
+	return sc
 }

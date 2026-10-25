@@ -6,11 +6,12 @@ const ReportSchemaVersion = "2"
 
 // RepoMetadata identifies the repository that was scanned, when available.
 type RepoMetadata struct {
-	Name       string `json:"name,omitempty"`
-	RemoteURL  string `json:"remote_url,omitempty"`
-	Branch     string `json:"branch,omitempty"`
-	CommitSHA  string `json:"commit_sha,omitempty"`
-	CommitDate string `json:"commit_date,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	RemoteURL  string   `json:"remote_url,omitempty"`
+	Branch     string   `json:"branch,omitempty"`
+	CommitSHA  string   `json:"commit_sha,omitempty"`
+	CommitDate string   `json:"commit_date,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
 }
 
 // Score summarises findings as a single number plus per-severity counts.
@@ -51,21 +52,33 @@ type Diagnostic struct {
 	Message string `json:"message"`
 }
 
+// ScanConfig captures the settings that produced a scan, so a report is
+// reproducible: "run with these exact settings to get this result."
+type ScanConfig struct {
+	Profile       string   `json:"profile,omitempty"`
+	Targets       []string `json:"targets,omitempty"`
+	DisabledRules []string `json:"disabled_rules,omitempty"`
+	EnabledRules  []string `json:"enabled_rules,omitempty"`
+	Exclude       []string `json:"exclude,omitempty"`
+}
+
 // ScanStats carries counters about a scan.
 type ScanStats struct {
-	FilesDiscovered int   `json:"files_discovered"`
-	FilesParsed     int   `json:"files_parsed"`
-	Resources       int   `json:"resources"`
-	RulesEvaluated  int   `json:"rules_evaluated"`
-	Suppressed      int    `json:"suppressed"`
-	DurationMillis  int64  `json:"duration_ms"`
-	ScannedAt       string `json:"scanned_at,omitempty"`
+	FilesDiscovered int      `json:"files_discovered"`
+	FilesParsed     int      `json:"files_parsed"`
+	Resources       int      `json:"resources"`
+	RulesEvaluated  int      `json:"rules_evaluated"`
+	Suppressed      int      `json:"suppressed"`
+	DurationMillis  int64    `json:"duration_ms"`
+	ScannedAt       string   `json:"scanned_at,omitempty"`
+	ScanPaths       []string `json:"scan_paths,omitempty"`
 }
 
 // Report is the complete result of a scan and the input to every reporter.
 type Report struct {
 	SchemaVersion string        `json:"schema_version"`
 	Repository    *RepoMetadata `json:"repository,omitempty"`
+	Config        *ScanConfig   `json:"config,omitempty"`
 	Score         Score         `json:"score"`
 	Findings      []Finding     `json:"findings"`
 	Results       []RuleResult  `json:"results"`

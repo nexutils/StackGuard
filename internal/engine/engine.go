@@ -158,7 +158,12 @@ func (e *Engine) Scan(ctx context.Context, paths []string) (*models.Report, erro
 	for i, f := range files {
 		inputs[i] = input{info: parser.NewFileInfo(f.Path), explicit: f.Explicit}
 	}
-	return e.run(ctx, inputs, start)
+	rep, err := e.run(ctx, inputs, start)
+	if err != nil {
+		return nil, err
+	}
+	rep.Stats.ScanPaths = paths
+	return rep, nil
 }
 
 // ScanSources scans in-memory sources, e.g. unsaved editor buffers.

@@ -13,11 +13,12 @@ import (
 
 // RepoInfo holds the metadata extracted from a git repository.
 type RepoInfo struct {
-	Name       string // "owner/repo", parsed from the remote URL
-	RemoteURL  string // sanitised origin URL (userinfo stripped)
-	Branch     string // current branch (or "HEAD" when detached)
-	CommitSHA  string // full 40-char HEAD SHA
-	CommitDate string // ISO 8601 commit date of HEAD
+	Name       string   // "owner/repo", parsed from the remote URL
+	RemoteURL  string   // sanitised origin URL (userinfo stripped)
+	Branch     string   // current branch (or "HEAD" when detached)
+	CommitSHA  string   // full 40-char HEAD SHA
+	CommitDate string   // ISO 8601 commit date of HEAD
+	Tags       []string // tags pointing at HEAD (e.g. "v1.2.0")
 }
 
 // Detect discovers git repository metadata for dir. It returns nil, nil
@@ -53,6 +54,14 @@ func Detect(dir string) (*RepoInfo, error) {
 	if remote, err := git(dir, "remote", "get-url", "origin"); err == nil && remote != "" {
 		info.RemoteURL = SanitizeURL(remote)
 		info.Name = ParseRepoName(remote)
+	}
+
+	if tags, err := git(dir, "tag", "--points-at", "HEAD"); err == nil && tags != "" {
+		for _, t := range strings.Split(tags, "\n") {
+			if t = strings.TrimSpace(t); t != "" {
+				info.Tags = append(info.Tags, t)
+			}
+		}
 	}
 
 	return info, nil

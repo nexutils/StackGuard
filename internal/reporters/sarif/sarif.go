@@ -43,10 +43,11 @@ type run struct {
 }
 
 type versionControlProvenance struct {
-	RepositoryURI string          `json:"repositoryUri"`
-	RevisionID    string          `json:"revisionId,omitempty"`
-	Branch        string          `json:"branch,omitempty"`
-	MappedTo      *mappedTo       `json:"mappedTo,omitempty"`
+	RepositoryURI string    `json:"repositoryUri"`
+	RevisionID    string    `json:"revisionId,omitempty"`
+	Branch        string    `json:"branch,omitempty"`
+	RevisionTag   string    `json:"revisionTag,omitempty"`
+	MappedTo      *mappedTo `json:"mappedTo,omitempty"`
 }
 
 type mappedTo struct {
@@ -201,6 +202,9 @@ func (s *Reporter) Report(w io.Writer, r *models.Report) error {
 			RevisionID:    repo.CommitSHA,
 			Branch:        repo.Branch,
 			MappedTo:      &mappedTo{URIBaseID: srcRoot},
+		}
+		if len(repo.Tags) > 0 {
+			vcp.RevisionTag = repo.Tags[0]
 		}
 		theRun.VersionControlProvenance = []versionControlProvenance{vcp}
 	}
