@@ -210,9 +210,9 @@ func upper(ss []string) []string {
 }
 
 func buildScanConfig(cfg config.Resolved, sf *scanFlags) *models.ScanConfig {
-	disabled := append(append([]string{}, cfg.Config.DisabledRules...), upper(sf.disable)...)
-	enabled := append(append([]string{}, cfg.Config.EnabledRules...), upper(sf.enable)...)
-	exclude := append(append([]string{}, cfg.Config.Exclude...), sf.exclude...)
+	disabled := append(append([]string{}, cfg.DisabledRules...), upper(sf.disable)...)
+	enabled := append(append([]string{}, cfg.EnabledRules...), upper(sf.enable)...)
+	exclude := append(append([]string{}, cfg.Exclude...), sf.exclude...)
 	sc := &models.ScanConfig{
 		Profile:       cfg.Config.Profile,
 		Targets:       cfg.Config.Targets,

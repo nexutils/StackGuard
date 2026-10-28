@@ -36,10 +36,10 @@ type log struct {
 }
 
 type run struct {
-	Tool                      tool                       `json:"tool"`
-	Results                   []result                   `json:"results"`
-	Invocations               []invocation               `json:"invocations"`
-	VersionControlProvenance  []versionControlProvenance  `json:"versionControlProvenance,omitempty"`
+	Tool                     tool                       `json:"tool"`
+	Results                  []result                   `json:"results"`
+	Invocations              []invocation               `json:"invocations"`
+	VersionControlProvenance []versionControlProvenance `json:"versionControlProvenance,omitempty"`
 }
 
 type versionControlProvenance struct {
