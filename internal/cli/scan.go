@@ -215,7 +215,7 @@ func buildScanConfig(cfg config.Resolved, sf *scanFlags) *models.ScanConfig {
 	exclude := append(append([]string{}, cfg.Exclude...), sf.exclude...)
 	sc := &models.ScanConfig{
 		Profile:       cfg.Config.Profile,
-		Targets:       cfg.Config.Targets,
+		Targets:       cfg.Targets,
 		DisabledRules: disabled,
 		EnabledRules:  enabled,
 		Exclude:       exclude,
