@@ -9,6 +9,7 @@ import (
 
 	"github.com/nexutils/StackGuard/internal/config"
 	"github.com/nexutils/StackGuard/internal/engine"
+	gitpkg "github.com/nexutils/StackGuard/internal/git"
 	"github.com/nexutils/StackGuard/internal/models"
 	"github.com/nexutils/StackGuard/internal/reporters"
 	reporterall "github.com/nexutils/StackGuard/internal/reporters/all"
@@ -47,11 +48,12 @@ var scanBindings = []flagBinding{
 
 func newScanCommand(a *app) *cobra.Command {
 	var (
-		sf          scanFlags
-		output      string
-		quiet       bool
-		showPassed  bool
-		omitSkipped bool
+		sf             scanFlags
+		output         string
+		quiet          bool
+		showPassed     bool
+		omitSkipped    bool
+		noRepoMetadata bool
 	)
 	cmd := &cobra.Command{
 		Use:   "scan [path...]",
@@ -65,6 +67,23 @@ func newScanCommand(a *app) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if !noRepoMetadata {
+				scanPaths := args
+				if len(scanPaths) == 0 {
+					scanPaths = []string{"."}
+				}
+				if info, err := gitpkg.Detect(scanPaths[0]); err == nil && info != nil {
+					rep.Repository = &models.RepoMetadata{
+						Name:       info.Name,
+						RemoteURL:  info.RemoteURL,
+						Branch:     info.Branch,
+						CommitSHA:  info.CommitSHA,
+						CommitDate: info.CommitDate,
+						Tags:       info.Tags,
+					}
+				}
+			}
+			rep.Config = buildScanConfig(cfg, &sf)
 			if err := a.writeReport(cfg.Format, output, quiet, showPassed, omitSkipped, rep); err != nil {
 				return err
 			}
@@ -79,6 +98,7 @@ func newScanCommand(a *app) *cobra.Command {
 	cmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "console: only print findings and the score")
 	cmd.Flags().BoolVar(&showPassed, "show-passed", false, "console: list every passed rule instead of a summary")
 	cmd.Flags().BoolVar(&omitSkipped, "omit-skipped", false, "json/sarif: drop rules with status skipped from the report (stats are unchanged)")
+	cmd.Flags().BoolVar(&noRepoMetadata, "no-repo-metadata", false, "omit repository metadata (name, URL, branch, commit) from the report")
 	return cmd
 }
 
@@ -187,4 +207,21 @@ func upper(ss []string) []string {
 		out[i] = strings.ToUpper(strings.TrimSpace(s))
 	}
 	return out
+}
+
+func buildScanConfig(cfg config.Resolved, sf *scanFlags) *models.ScanConfig {
+	disabled := append(append([]string{}, cfg.DisabledRules...), upper(sf.disable)...)
+	enabled := append(append([]string{}, cfg.EnabledRules...), upper(sf.enable)...)
+	exclude := append(append([]string{}, cfg.Exclude...), sf.exclude...)
+	sc := &models.ScanConfig{
+		Profile:       cfg.Config.Profile,
+		Targets:       cfg.Targets,
+		DisabledRules: disabled,
+		EnabledRules:  enabled,
+		Exclude:       exclude,
+	}
+	if sc.Profile == "" && len(sc.Targets) == 0 && len(sc.DisabledRules) == 0 && len(sc.EnabledRules) == 0 && len(sc.Exclude) == 0 {
+		return nil
+	}
+	return sc
 }

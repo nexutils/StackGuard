@@ -50,10 +50,17 @@
   .empty { padding: 24px 16px; color: var(--good); font-weight: 600; }
   footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .repo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px;
+              padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+  .repo-name { font-weight: 600; }
+  .repo-tag { padding: 2px 8px; border-radius: 999px; background: var(--info-bg); color: var(--info); font-size: 11px; font-weight: 600; }
+  .repo-sha { color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
+  
+
   <header>
     <div class="score good">87<small>/100</small></div>
     <div>
@@ -97,6 +104,8 @@
     <h2>Passed (1)</h2>
     <ul class="passed"><li>Containers use pinned image versions <code class="muted">COMP_MNT_001</code></li></ul>
   </section>
+  
+
   
 
   

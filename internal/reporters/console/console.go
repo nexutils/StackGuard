@@ -51,6 +51,27 @@ func (c *Reporter) symbol(s models.Severity) string {
 func (c *Reporter) Report(out io.Writer, r *models.Report) error {
 	w := bufio.NewWriter(out)
 
+	if repo := r.Repository; repo != nil {
+		parts := []string{}
+		if repo.Name != "" {
+			parts = append(parts, repo.Name)
+		}
+		if repo.Branch != "" {
+			parts = append(parts, repo.Branch)
+		}
+		if repo.CommitSHA != "" {
+			sha := repo.CommitSHA
+			if len(sha) > 8 {
+				sha = sha[:8]
+			}
+			parts = append(parts, sha)
+		}
+		if len(parts) > 0 {
+			fmt.Fprintln(w, c.paint(dim, strings.Join(parts, " · ")))
+			fmt.Fprintln(w)
+		}
+	}
+
 	if len(r.Findings) == 0 {
 		fmt.Fprintf(w, "%s No issues found\n", c.paint(green, "✓"))
 	}

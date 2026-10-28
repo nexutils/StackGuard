@@ -50,10 +50,24 @@
   .empty { padding: 24px 16px; color: var(--good); font-weight: 600; }
   footer { margin-top: 32px; font-size: 13px; color: var(--muted); }
   code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  .repo-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 16px;
+              padding: 8px 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+  .repo-name { font-weight: 600; }
+  .repo-tag { padding: 2px 8px; border-radius: 999px; background: var(--info-bg); color: var(--info); font-size: 11px; font-weight: 600; }
+  .repo-sha { color: var(--muted); }
 </style>
 </head>
 <body>
 <main>
+  {{if .Repository}}
+  <div class="repo-bar">
+    {{if .Repository.Name}}<span class="repo-name">{{.Repository.Name}}</span>{{end}}
+    {{if .Repository.Branch}}<span class="repo-tag">{{.Repository.Branch}}</span>{{end}}
+    {{if .Repository.Tags}}{{range .Repository.Tags}}<span class="repo-tag" style="background:var(--good-bg);color:var(--good);">{{.}}</span>{{end}}{{end}}
+    {{if .Repository.CommitSHA}}<code class="repo-sha">{{shortSHA .Repository.CommitSHA}}</code>{{end}}
+  </div>
+  {{end}}
+
   <header>
     <div class="score {{scoreClass .Report.Score.Total}}">{{.Report.Score.Total}}<small>/{{.Report.Score.Max}}</small></div>
     <div>
@@ -91,6 +105,22 @@
   <section>
     <h2>Passed ({{len .Passed}})</h2>
     <ul class="passed">{{range .Passed}}<li>{{.Message}} <code class="muted">{{.ID}}</code></li>{{end}}</ul>
+  </section>
+  {{end}}
+
+  {{if or .Config .Report.Stats.ScanPaths}}
+  <section>
+    <h2>Scan configuration</h2>
+    <ul class="passed">
+      {{if .Report.Stats.ScanPaths}}<li><strong>Paths:</strong> <code>{{join .Report.Stats.ScanPaths ", "}}</code></li>{{end}}
+      {{if .Config}}
+        {{if .Config.Profile}}<li><strong>Profile:</strong> {{.Config.Profile}}</li>{{end}}
+        {{if .Config.Targets}}<li><strong>Targets:</strong> {{join .Config.Targets ", "}}</li>{{end}}
+        {{if .Config.DisabledRules}}<li><strong>Disabled:</strong> {{join .Config.DisabledRules ", "}}</li>{{end}}
+        {{if .Config.EnabledRules}}<li><strong>Enabled:</strong> {{join .Config.EnabledRules ", "}}</li>{{end}}
+        {{if .Config.Exclude}}<li><strong>Exclude:</strong> {{join .Config.Exclude ", "}}</li>{{end}}
+      {{end}}
+    </ul>
   </section>
   {{end}}
 

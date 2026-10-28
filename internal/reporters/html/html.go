@@ -7,6 +7,7 @@ import (
 	"html/template"
 	"io"
 	"sort"
+	"strings"
 
 	"github.com/nexutils/StackGuard/internal/models"
 	"github.com/nexutils/StackGuard/internal/reporters"
@@ -36,6 +37,13 @@ var tmpl = template.Must(template.New("report").Funcs(template.FuncMap{
 			return "good"
 		}
 	},
+	"shortSHA": func(sha string) string {
+		if len(sha) > 8 {
+			return sha[:8]
+		}
+		return sha
+	},
+	"join": strings.Join,
 }).Parse(tmplSource))
 
 // Reporter is the HTML reporter.
@@ -57,14 +65,16 @@ type passedRule struct {
 }
 
 type view struct {
-	Report  *models.Report
-	Version string
-	Files   []fileGroup
-	Passed  []passedRule
+	Report     *models.Report
+	Version    string
+	Files      []fileGroup
+	Passed     []passedRule
+	Repository *models.RepoMetadata
+	Config     *models.ScanConfig
 }
 
 func (h *Reporter) Report(w io.Writer, r *models.Report) error {
-	v := view{Report: r, Version: h.opts.ToolVersion}
+	v := view{Report: r, Version: h.opts.ToolVersion, Repository: r.Repository, Config: r.Config}
 	byFile := map[string][]models.Finding{}
 	for _, f := range r.Findings {
 		byFile[f.File] = append(byFile[f.File], f)

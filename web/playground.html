@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Playground - StackGuard</title>
+<meta name="description" content="Try StackGuard in your browser. Scan Dockerfiles, Compose, Kubernetes, Terraform and more - entirely client-side via WebAssembly.">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#121211">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23121211'/%3E%3Cpath d='M16 5 25 8.4v6.3c0 5.5-3.7 9.3-9 10.6-5.3-1.3-9-5.1-9-10.6V8.4L16 5Z' fill='none' stroke='%235ec46e' stroke-width='1.6' stroke-linejoin='round'/%3E%3Cpath d='M12 16l3 3 5.5-6' fill='none' stroke='%235ec46e' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #121211;
+    --bg-2:      #171716;
+    --panel:     #1c1c1a;
+    --panel-2:   #222220;
+    --text:      #ededea;
+    --muted:     #a0a099;
+    --faint:     #6f6f68;
+    --border:    #302f2c;
+    --border-2:  #3b3a36;
+    --accent:    #5ec46e;
+    --accent-dim:#3f7f49;
+    --accent-ink:#0d1a0f;
+    --error:   #ef6b6b;  --error-bg:   #2c1817;
+    --warning: #f0a93b;  --warning-bg: #2b2112;
+    --info:    #6aa8f0;  --info-bg:    #15202f;
+    --r-btn: 10px;
+    --r-card: 14px;
+    --maxw: 1200px;
+    --ease: cubic-bezier(.16,1,.3,1);
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html { height: 100%; -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: "Hanken Grotesk", system-ui, sans-serif;
+    font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+  }
+  a { color: inherit; text-decoration: none; }
+  h1,h2,h3 { font-family: "Space Grotesk", system-ui, sans-serif; font-weight: 600; letter-spacing: -0.02em; margin: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+  /* nav — matches index.html */
+  header.nav {
+    position: sticky; top: 0; z-index: 50; flex-shrink: 0;
+    height: 68px; display: flex; align-items: center;
+    background: rgba(18,18,17,.72);
+    backdrop-filter: saturate(160%) blur(12px);
+    -webkit-backdrop-filter: saturate(160%) blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .wrap { width: 100%; max-width: var(--maxw); margin: 0 auto; padding: 0 24px; }
+  .nav .wrap { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 18px; letter-spacing: -0.01em; }
+  .brand .mark { width: 26px; height: 26px; }
+  .nav-links { display: flex; align-items: center; gap: 28px; }
+  .nav-links a { color: var(--muted); font-size: 15px; transition: color .15s var(--ease); }
+  .nav-links a:hover { color: var(--text); }
+  .nav-links a.active { color: var(--accent); }
+  .nav-right { display: flex; align-items: center; gap: 14px; }
+  .nav-right .gh { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  .nav-right .gh:hover { color: var(--text); }
+  .nav-right .gh svg { width: 18px; height: 18px; }
+  .btn { display: inline-flex; align-items: center; gap: 9px; font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 15px; padding: 11px 18px; border-radius: var(--r-btn); border: 1px solid transparent; cursor: pointer; white-space: nowrap; transition: transform .18s var(--ease), background .18s var(--ease); }
+  .btn svg { width: 17px; height: 17px; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover { background: #71d481; transform: translateY(-1px); }
+  .btn-sm { padding: 8px 13px; font-size: 14px; }
+  @media (max-width: 860px) { .nav-links { display: none; } }
+
+  /* toolbar */
+  .toolbar {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    padding: 10px 24px; border-bottom: 1px solid var(--border); background: var(--bg-2); flex-shrink: 0;
+  }
+  .toolbar-left { display: flex; align-items: center; gap: 16px; }
+  .toolbar h2 { font-size: 16px; }
+  .toolbar-right { display: flex; align-items: center; gap: 10px; }
+  .sample-select {
+    font-family: var(--mono); font-size: 12px; padding: 6px 10px;
+    background: var(--panel); border: 1px solid var(--border-2); border-radius: 6px;
+    color: var(--text); cursor: pointer; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%236f6f68'%3E%3Cpath d='M2 4l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 8px center; padding-right: 26px;
+  }
+  .scan-btn {
+    display: inline-flex; align-items: center; gap: 7px;
+    font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 13px;
+    padding: 7px 16px; border-radius: var(--r-btn); border: 0; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink);
+    transition: background .15s var(--ease), transform .15s var(--ease);
+  }
+  .scan-btn:hover:not(:disabled) { background: #71d481; transform: translateY(-1px); }
+  .scan-btn:disabled { opacity: .5; cursor: default; }
+
+  /* main split */
+  .main { flex: 1; display: grid; grid-template-columns: 1fr 1fr; min-height: 0; }
+  @media (max-width: 800px) { .main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; } }
+
+  /* editor pane */
+  .ed-pane { display: flex; flex-direction: column; border-right: 1px solid var(--border); min-height: 0; min-width: 0; }
+  .ed-tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0; position: relative; }
+  .tab-strip {
+    flex: 1; min-width: 0; display: flex; overflow-x: auto; scrollbar-width: none;
+    -webkit-mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent 100%);
+    mask-image: linear-gradient(to right, transparent 0, #000 var(--fade-l, 0px), #000 calc(100% - var(--fade-r, 0px)), transparent 100%);
+  }
+  .tab-strip::-webkit-scrollbar { display: none; }
+  .ed-tab {
+    padding: 9px 16px; font-family: var(--mono); font-size: 12px;
+    color: var(--faint); border-bottom: 2px solid transparent;
+    white-space: nowrap; cursor: pointer; transition: all .15s var(--ease);
+    display: flex; align-items: center; gap: 6px; flex-shrink: 0;
+  }
+  .ed-tab:hover { color: var(--muted); }
+  .ed-tab.active { color: var(--text); border-bottom-color: var(--accent); background: var(--bg-2); }
+  .ed-tab .close { display: none; width: 14px; height: 14px; border: 0; background: 0; cursor: pointer; color: var(--faint); padding: 0; border-radius: 3px; }
+  .ed-tab .close:hover { color: var(--error); background: var(--error-bg); }
+  .ed-tab.closable .close { display: inline-flex; align-items: center; justify-content: center; }
+  .add-tab-btn {
+    flex-shrink: 0; padding: 9px 16px; font-family: var(--mono); font-size: 12px;
+    color: var(--accent-dim); border: 0; background: var(--panel);
+    border-bottom: 2px solid transparent; border-left: 1px solid var(--border);
+    cursor: pointer; white-space: nowrap; transition: color .15s var(--ease);
+  }
+  .add-tab-btn:hover { color: var(--accent); }
+  .ed-area { flex: 1; min-height: 0; overflow: hidden; }
+  .ed-area textarea {
+    width: 100%; height: 100%; resize: none; border: 0;
+    background: var(--bg-2); color: var(--text); padding: 14px 16px;
+    font-family: var(--mono); font-size: 13px; line-height: 1.8; tab-size: 2;
+  }
+  .ed-area textarea:focus { outline: none; }
+
+  /* results pane */
+  .rs-pane { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  .rs-header {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--panel); flex-shrink: 0;
+  }
+  .rs-label { font-family: var(--mono); font-size: 12px; color: var(--faint); display: flex; align-items: center; gap: 8px; }
+  .rs-count { font-weight: 600; color: var(--text); }
+  .score-badge { font-family: var(--mono); font-size: 14px; font-weight: 700; padding: 4px 12px; border-radius: 999px; }
+  .score-high { background: rgba(94,196,110,.15); color: var(--accent); }
+  .score-mid  { background: var(--warning-bg); color: var(--warning); }
+  .score-low  { background: var(--error-bg); color: var(--error); }
+  .rs-body { flex: 1; overflow: auto; padding: 12px 14px; }
+
+  .finding {
+    padding: 12px 14px; border-radius: 10px; margin-bottom: 8px;
+    border: 1px solid var(--border); background: var(--panel);
+    cursor: pointer; transition: border-color .15s var(--ease);
+  }
+  .finding:hover { border-color: var(--border-2); }
+  .finding-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .sev {
+    font-family: var(--mono); font-size: 10px; font-weight: 700;
+    padding: 2px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .04em;
+  }
+  .sev-error   { background: var(--error-bg);   color: var(--error); }
+  .sev-warning { background: var(--warning-bg); color: var(--warning); }
+  .sev-info    { background: var(--info-bg);    color: var(--info); }
+  .finding-id { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .finding-title { font-size: 13px; font-weight: 600; }
+  .finding-msg { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+  .finding-loc { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 6px; }
+
+  /* empty & loading states */
+  .state-msg { padding: 48px 24px; text-align: center; color: var(--faint); font-size: 14px; }
+  .state-msg .icon { font-size: 28px; margin-bottom: 10px; }
+  .state-msg h3 { font-size: 15px; color: var(--muted); margin-bottom: 6px; }
+  .loader { display: inline-block; width: 18px; height: 18px; border: 2px solid var(--border-2); border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* add-file menu */
+  .add-menu {
+    position: absolute; top: 38px; right: 8px; z-index: 20;
+    background: var(--panel); border: 1px solid var(--border-2); border-radius: 10px;
+    padding: 6px; min-width: 220px; box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    max-height: 320px; overflow-y: auto;
+  }
+  .add-menu[hidden] { display: none; }
+  .add-menu button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 8px 10px; border: 0; background: 0; color: var(--text);
+    font-family: var(--mono); font-size: 12px; border-radius: 6px; cursor: pointer;
+    text-align: left;
+  }
+  .add-menu button:hover { background: var(--panel-2); }
+  .add-menu .ft-label { color: var(--faint); font-size: 11px; margin-left: auto; }
+
+  /* status bar */
+  .status {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    padding: 6px 24px; border-top: 1px solid var(--border); background: var(--panel);
+    font-family: var(--mono); font-size: 11px; color: var(--faint); flex-shrink: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="StackGuard home" translate="no">
+      <svg class="mark" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M16 2.5 28 7v8.4c0 7.3-4.9 12.4-12 14.1C8.9 27.8 4 22.7 4 15.4V7L16 2.5Z" fill="rgba(94,196,110,.12)" stroke="#5ec46e" stroke-width="1.7" stroke-linejoin="round"/>
+        <path d="M10.5 16.2l3.8 3.8 7-7.6" stroke="#5ec46e" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      StackGuard
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="index.html#targets">Targets</a>
+      <a href="index.html#how">How it works</a>
+      <a href="index.html#rules">Rules</a>
+      <a href="index.html#ci">CI</a>
+      <a href="docs.html">Docs</a>
+      <a href="playground.html" class="active">Playground</a>
+    </nav>
+    <div class="nav-right">
+      <a class="gh" href="https://github.com/nexutils/StackGuard" aria-label="StackGuard on GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.53.1.72-.23.72-.5v-1.76c-2.93.64-3.55-1.41-3.55-1.41-.48-1.22-1.17-1.54-1.17-1.54-.96-.66.07-.64.07-.64 1.06.07 1.62 1.09 1.62 1.09.94 1.62 2.47 1.15 3.07.88.1-.68.37-1.15.67-1.41-2.34-.27-4.8-1.17-4.8-5.2 0-1.15.41-2.09 1.08-2.83-.11-.27-.47-1.34.1-2.8 0 0 .88-.28 2.88 1.08a9.9 9.9 0 0 1 5.24 0c2-1.36 2.88-1.08 2.88-1.08.57 1.46.21 2.53.1 2.8.67.74 1.08 1.68 1.08 2.83 0 4.04-2.47 4.93-4.82 5.19.38.33.72.97.72 1.96v2.9c0 .28.19.61.73.5A10.5 10.5 0 0 0 12 1.5Z"/></svg>
+        Star
+      </a>
+    </div>
+  </div>
+</header>
+
+<div class="toolbar">
+  <div class="toolbar-left">
+    <h2>Playground</h2>
+    <span style="color:var(--faint);font-size:13px" id="subtitle">Loading scanner&hellip;</span>
+    <span id="targetBadge" style="font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:4px;background:var(--info-bg);color:var(--info)" hidden></span>
+  </div>
+  <div class="toolbar-right">
+    <select class="sample-select" id="sampleSelect">
+      <option value="">Load example&hellip;</option>
+    </select>
+    <button class="scan-btn" id="scanBtn" disabled>
+      <svg viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M6 3v10l7-5-7-5z" fill="currentColor"/></svg>
+      Scan
+    </button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="ed-pane">
+    <div class="ed-tabs">
+      <div class="tab-strip" id="tabStrip"></div>
+      <button class="add-tab-btn" id="addTabBtn" type="button">+ Add file</button>
+    </div>
+    <div class="ed-area"><textarea id="editor" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off"></textarea></div>
+  </div>
+  <div class="rs-pane">
+    <div class="rs-header">
+      <div class="rs-label" id="rsLabel"><span class="rs-count">No results</span></div>
+      <div class="score-badge score-high" id="scoreBadge" hidden></div>
+    </div>
+    <div class="rs-body" id="rsBody">
+      <div class="state-msg" id="emptyState">
+        <div class="icon"><span class="loader"></span></div>
+        <h3>Loading StackGuard WASM&hellip;</h3>
+        <p>This may take a moment on the first visit.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="status">
+  <span id="statusLeft">Initializing&hellip;</span>
+  <span>All processing happens in your browser</span>
+</div>
+
+<script src="wasm_exec.js"></script>
+<script>
+(function() {
+  "use strict";
+
+  // --- File types recognized by StackGuard's parsers ---
+  var FILE_TYPES = [
+    { label: "Dockerfile",        path: "Dockerfile",                  target: "dockerfile" },
+    { label: "Docker Compose",    path: "docker-compose.yml",          target: "compose" },
+    { label: "Kubernetes",        path: "manifest.yaml",               target: "kubernetes" },
+    { label: "Helm values",       path: "values.yaml",                 target: "helm" },
+    { label: "Helm Chart.yaml",   path: "Chart.yaml",                  target: "helm" },
+    { label: "Terraform",         path: "main.tf",                     target: "terraform" },
+    { label: "GitHub Actions",    path: ".github/workflows/ci.yml",    target: "github" },
+    { label: "Jenkinsfile",       path: "Jenkinsfile",                 target: "jenkins" },
+    { label: "Ansible playbook",  path: "playbook.yml",                target: "ansible" },
+    { label: "nginx config",      path: "nginx.conf",                  target: "nginx" },
+  ];
+
+  // --- Sample configs ---
+  var SAMPLES = {
+    dockerfile: {
+      label: "Dockerfile - common issues",
+      name: "Dockerfile",
+      path: "Dockerfile",
+      content: 'FROM node:latest\nUSER root\nWORKDIR /app\nCOPY package*.json ./\nRUN npm ci --production\nCOPY . .\nEXPOSE 3000\nCMD ["node", "server.js"]\n'
+    },
+    compose: {
+      label: "Docker Compose - two services",
+      name: "docker-compose.yml",
+      path: "docker-compose.yml",
+      content: 'version: "3.8"\nservices:\n  api:\n    image: myapp:latest\n    privileged: true\n    ports:\n      - "80:3000"\n  redis:\n    image: redis:7\n    ports:\n      - "6379:6379"\n'
+    },
+    k8s: {
+      label: "Kubernetes - Deployment",
+      name: "deploy.yaml",
+      path: "deploy.yaml",
+      content: 'apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: web\nspec:\n  replicas: 1\n  selector:\n    matchLabels:\n      app: web\n  template:\n    metadata:\n      labels:\n        app: web\n    spec:\n      containers:\n        - name: web\n          image: nginx:latest\n          ports:\n            - containerPort: 80\n          securityContext:\n            runAsRoot: true\n'
+    },
+    helm: {
+      label: "Helm - values.yaml",
+      name: "values.yaml",
+      path: "values.yaml",
+      content: 'replicaCount: 1\nimage:\n  repository: myapp\n  tag: latest\n  pullPolicy: Always\nservice:\n  type: ClusterIP\n  port: 80\nresources: {}\nsecurityContext:\n  runAsRoot: true\n'
+    },
+    terraform: {
+      label: "Terraform - S3 + SG",
+      name: "main.tf",
+      path: "main.tf",
+      content: 'resource "aws_s3_bucket" "data" {\n  bucket = "my-data-bucket"\n}\n\nresource "aws_s3_bucket_acl" "data" {\n  bucket = aws_s3_bucket.data.id\n  acl    = "public-read"\n}\n\nresource "aws_security_group" "web" {\n  name = "web-sg"\n  ingress {\n    from_port   = 0\n    to_port     = 0\n    protocol    = "-1"\n    cidr_blocks = ["0.0.0.0/0"]\n  }\n}\n'
+    },
+    gha: {
+      label: "GitHub Actions - CI",
+      name: "ci.yml",
+      path: ".github/workflows/ci.yml",
+      content: 'name: CI\non: [push]\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@main\n      - run: npm install\n      - run: npm test\n      - uses: docker/build-push-action@master\n        with:\n          push: true\n          tags: myapp:latest\n'
+    },
+    nginx: {
+      label: "nginx - reverse proxy",
+      name: "nginx.conf",
+      path: "nginx.conf",
+      content: 'worker_processes 1;\nevents { worker_connections 1024; }\nhttp {\n  server {\n    listen 80;\n    server_name example.com;\n    location / {\n      proxy_pass http://backend:3000;\n      autoindex on;\n    }\n  }\n}\n'
+    }
+  };
+
+  // --- State ---
+  var tabs = [];
+  var activeTab = 0;
+  var wasmReady = false;
+
+  // --- DOM refs ---
+  var tabStrip = document.getElementById("tabStrip");
+  var addTabBtn = document.getElementById("addTabBtn");
+  var editor = document.getElementById("editor");
+  var scanBtn = document.getElementById("scanBtn");
+  var sampleSelect = document.getElementById("sampleSelect");
+  var rsBody = document.getElementById("rsBody");
+  var rsLabel = document.getElementById("rsLabel");
+  var scoreBadge = document.getElementById("scoreBadge");
+  var statusLeft = document.getElementById("statusLeft");
+  var subtitle = document.getElementById("subtitle");
+  var emptyState = document.getElementById("emptyState");
+
+  // --- Init samples dropdown ---
+  Object.keys(SAMPLES).forEach(function(key) {
+    var o = document.createElement("option");
+    o.value = key;
+    o.textContent = SAMPLES[key].label;
+    sampleSelect.appendChild(o);
+  });
+
+  // --- Tab management ---
+  function addTab(name, path, content) {
+    tabs.push({ name: name, path: path, content: content });
+    renderTabs();
+    switchTab(tabs.length - 1);
+  }
+
+  function removeTab(idx) {
+    if (tabs.length <= 1) return;
+    tabs.splice(idx, 1);
+    if (activeTab >= tabs.length) activeTab = tabs.length - 1;
+    renderTabs();
+    switchTab(activeTab);
+  }
+
+  function switchTab(idx) {
+    if (activeTab < tabs.length) tabs[activeTab].content = editor.value;
+    activeTab = idx;
+    editor.value = tabs[idx].content;
+    renderTabs();
+    updateTargetBadge();
+    editor.focus();
+  }
+
+  function updateTargetBadge() {
+    var badge = document.getElementById("targetBadge");
+    var tab = tabs[activeTab];
+    if (!tab) { badge.hidden = true; return; }
+    var match = FILE_TYPES.find(function(ft) { return ft.path === tab.path; });
+    if (match) {
+      badge.textContent = match.target;
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+    }
+  }
+
+  function renderTabs() {
+    tabStrip.innerHTML = "";
+    tabs.forEach(function(tab, i) {
+      var el = document.createElement("div");
+      el.className = "ed-tab" + (i === activeTab ? " active" : "") + (tabs.length > 1 ? " closable" : "");
+      el.textContent = tab.name;
+      el.addEventListener("click", function(e) {
+        if (e.target.classList.contains("close")) return;
+        switchTab(i);
+      });
+      if (tabs.length > 1) {
+        var btn = document.createElement("button");
+        btn.className = "close";
+        btn.innerHTML = "&times;";
+        btn.title = "Close tab";
+        btn.addEventListener("click", function(e) { e.stopPropagation(); removeTab(i); });
+        el.appendChild(btn);
+      }
+      tabStrip.appendChild(el);
+    });
+    updateScrollFade();
+    scrollActiveTabIntoView();
+  }
+
+  function updateScrollFade() {
+    var sl = tabStrip.scrollLeft;
+    var sw = tabStrip.scrollWidth;
+    var cw = tabStrip.clientWidth;
+    tabStrip.style.setProperty("--fade-l", sl > 4 ? "20px" : "0px");
+    tabStrip.style.setProperty("--fade-r", sl + cw < sw - 4 ? "20px" : "0px");
+  }
+  tabStrip.addEventListener("scroll", updateScrollFade, { passive: true });
+
+  function scrollActiveTabIntoView() {
+    var active = tabStrip.querySelector(".ed-tab.active");
+    if (active) active.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }
+
+  // Add-file menu — lives in .ed-pane so it isn't destroyed by renderTabs
+  var addMenuEl = document.createElement("div");
+  addMenuEl.className = "add-menu";
+  addMenuEl.hidden = true;
+  FILE_TYPES.forEach(function(ft) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.innerHTML = escapeHtml(ft.label) + '<span class="ft-label">' + escapeHtml(ft.path) + '</span>';
+    btn.addEventListener("click", function(e) {
+      e.stopPropagation();
+      addMenuEl.hidden = true;
+      addTab(ft.label, ft.path, "");
+    });
+    addMenuEl.appendChild(btn);
+  });
+  tabStrip.parentElement.appendChild(addMenuEl);
+
+  addTabBtn.addEventListener("click", function(e) {
+    e.stopPropagation();
+    showAddMenu();
+  });
+
+  function showAddMenu() {
+    addMenuEl.hidden = !addMenuEl.hidden;
+    if (!addMenuEl.hidden) {
+      setTimeout(function() {
+        document.addEventListener("click", closeAddMenu);
+      }, 0);
+    }
+  }
+  function closeAddMenu(e) {
+    if (!addMenuEl.contains(e.target) && e.target !== addTabBtn) {
+      addMenuEl.hidden = true;
+      document.removeEventListener("click", closeAddMenu);
+    }
+  }
+
+  // --- Load sample ---
+  sampleSelect.addEventListener("change", function() {
+    var s = SAMPLES[this.value];
+    if (!s) return;
+    tabs = [{ name: s.name, path: s.path, content: s.content }];
+    activeTab = 0;
+    editor.value = s.content;
+    renderTabs();
+    updateTargetBadge();
+    editor.focus();
+    this.value = "";
+    if (wasmReady) runScan();
+  });
+
+  // --- Scan ---
+  scanBtn.addEventListener("click", runScan);
+  editor.addEventListener("keydown", function(e) {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); runScan(); }
+  });
+
+  function runScan() {
+    if (!wasmReady) return;
+    tabs[activeTab].content = editor.value;
+
+    var files = tabs.map(function(t) { return { path: t.path, content: t.content }; });
+    scanBtn.disabled = true;
+    scanBtn.innerHTML = '<span class="loader" style="width:14px;height:14px;border-width:2px"></span> Scanning…';
+
+    var start = performance.now();
+    stackguardScan(JSON.stringify(files)).then(function(resultJSON) {
+      var elapsed = Math.round(performance.now() - start);
+      var report = JSON.parse(resultJSON);
+      renderResults(report, elapsed);
+      scanBtn.disabled = false;
+      scanBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M6 3v10l7-5-7-5z" fill="currentColor"/></svg> Scan';
+    }).catch(function(err) {
+      rsBody.innerHTML = '<div class="state-msg"><h3>Scan error</h3><p>' + escapeHtml(err.message || String(err)) + '</p></div>';
+      scanBtn.disabled = false;
+      scanBtn.innerHTML = '<svg viewBox="0 0 16 16" fill="none" width="14" height="14"><path d="M6 3v10l7-5-7-5z" fill="currentColor"/></svg> Scan';
+    });
+  }
+
+  function renderResults(report, elapsed) {
+    var findings = report.findings || [];
+    var score = report.score || {};
+    var stats = report.stats || {};
+
+    // Score badge
+    scoreBadge.hidden = false;
+    scoreBadge.textContent = "Score: " + (score.total != null ? score.total : "-");
+    scoreBadge.className = "score-badge " + (score.total >= 80 ? "score-high" : score.total >= 50 ? "score-mid" : "score-low");
+
+    // Label
+    var count = findings.length;
+    var rulesEval = stats.rules_evaluated || 0;
+    rsLabel.innerHTML = '<span class="rs-count">' + count + " finding" + (count !== 1 ? "s" : "") + '</span><span>· ' + rulesEval + " rules evaluated</span>";
+
+    // Status
+    statusLeft.textContent = "Scanned in " + elapsed + "ms · " + tabs.length + " file" + (tabs.length !== 1 ? "s" : "") + " · " + rulesEval + " rules";
+
+    if (count === 0) {
+      rsBody.innerHTML = '<div class="state-msg"><div class="icon" style="color:var(--accent)">&#10003;</div><h3>No issues found</h3><p>All ' + rulesEval + ' rules passed.</p></div>';
+      return;
+    }
+
+    rsBody.innerHTML = "";
+    findings.forEach(function(f) {
+      var card = document.createElement("div");
+      card.className = "finding";
+      card.tabIndex = 0;
+      var sev = (f.severity || "info").toLowerCase();
+      var sevClass = "sev-" + sev;
+      card.innerHTML =
+        '<div class="finding-top"><span class="sev ' + sevClass + '">' + escapeHtml(sev) + '</span><span class="finding-id">' + escapeHtml(f.rule_id || "") + '</span></div>' +
+        '<div class="finding-title">' + escapeHtml(f.title || "") + '</div>' +
+        '<div class="finding-msg">' + escapeHtml(f.message || "") + '</div>' +
+        '<div class="finding-loc">' + escapeHtml(f.file || "") + (f.line ? ":" + f.line : "") + '</div>';
+      rsBody.appendChild(card);
+    });
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  // --- Load WASM ---
+  var go = new Go();
+  WebAssembly.instantiateStreaming(fetch("stackguard.wasm"), go.importObject).then(function(result) {
+    go.run(result.instance);
+    wasmReady = true;
+    scanBtn.disabled = false;
+    subtitle.textContent = "Try StackGuard in your browser - no install needed";
+    emptyState.innerHTML = '<div class="icon" style="color:var(--accent)"><svg viewBox="0 0 32 32" fill="none" width="32" height="32"><path d="M16 2.5 28 7v8.4c0 7.3-4.9 12.4-12 14.1C8.9 27.8 4 22.7 4 15.4V7L16 2.5Z" fill="rgba(94,196,110,.12)" stroke="#5ec46e" stroke-width="1.7" stroke-linejoin="round"/><path d="M10.5 16.2l3.8 3.8 7-7.6" stroke="#5ec46e" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/></svg></div><h3>Ready to scan</h3><p>Edit a file on the left and click Scan, or load an example.</p>';
+    statusLeft.textContent = "Ready · " + (typeof stackguardTargets === "function" ? JSON.parse(stackguardTargets()).length : "?") + " targets";
+
+    // Load default sample
+    addTab(SAMPLES.dockerfile.name, SAMPLES.dockerfile.path, SAMPLES.dockerfile.content);
+  }).catch(function(err) {
+    emptyState.innerHTML = '<div class="icon" style="color:var(--error)">!</div><h3>Failed to load WASM</h3><p>' + escapeHtml(err.message || String(err)) + '</p>';
+    statusLeft.textContent = "WASM load failed";
+  });
+})();
+</script>
+
+</body>
+</html>

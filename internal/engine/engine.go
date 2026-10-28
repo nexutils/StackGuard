@@ -158,7 +158,12 @@ func (e *Engine) Scan(ctx context.Context, paths []string) (*models.Report, erro
 	for i, f := range files {
 		inputs[i] = input{info: parser.NewFileInfo(f.Path), explicit: f.Explicit}
 	}
-	return e.run(ctx, inputs, start)
+	rep, err := e.run(ctx, inputs, start)
+	if err != nil {
+		return nil, err
+	}
+	rep.Stats.ScanPaths = paths
+	return rep, nil
 }
 
 // ScanSources scans in-memory sources, e.g. unsaved editor buffers.
@@ -256,6 +261,7 @@ func (e *Engine) run(ctx context.Context, inputs []input, start time.Time) (*mod
 	rep.Stats.RulesEvaluated = len(e.rules)
 	rep.Score = e.opts.Scorer.Score(rep.Findings)
 	rep.Stats.DurationMillis = time.Since(start).Milliseconds()
+	rep.Stats.ScannedAt = start.UTC().Format(time.RFC3339)
 	return rep, nil
 }
 
